@@ -3,7 +3,7 @@ This code allows you to do inference on self-exciting point processes with inhom
 
 ## Usage
 
-## Example
+See ```demo.ipynb``` for a demo.
 
 [1] X. Miscouridou, G. Mohler, S. Bhatt, S. Flaxman, S. Mishra, Cox-Hawkes: Doubly stochastic spatiotemporal poisson point process, Transaction of Machine Learning Research, 2023
 
