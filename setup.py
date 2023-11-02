@@ -1,6 +1,6 @@
 from setuptools import setup
 
-with open('README.txt','r') as f:
+with open('README.mc','r') as f:
     desc = f.read()
 
 with open('requirements.txt','r') as f:
