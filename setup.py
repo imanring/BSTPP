@@ -19,6 +19,6 @@ setup(
     
     licence = 'MIT',
     py_modules=['BSTPP'],
-    description="Bayesian Spatiotemporal Point Process"
+    description="Bayesian Spatiotemporal Point Process",
     long_description=desc,
 )
