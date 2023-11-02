@@ -143,7 +143,7 @@ class Point_Process_Model:
         
         output_dict['samples']=self.mcmc_samples
         output_dict['mcmc']=self.mcmc
-        with open('output/output.pkl', 'wb') as handle:
+        with open('output/'+self.args['model']+'/output.pkl', 'wb') as handle:
             dill.dump(output_dict, handle)
 
     def plot_trigger_posterior(self,output_file=None):
@@ -197,6 +197,14 @@ class Point_Process_Model:
         print(f'Mean trigger time: {round(1/(post_mean*scale),2)} '+t_units)
 
     def cov_weight_post_summary(self,plot_file=None,summary_file=None):
+        """
+        Plot posteriors of weights and bias and save summary of posteriors]
+        Parameters:
+            plot_file (str): path in which to save plot
+            summary_file (str): path in which to save summary
+        Returns:
+            (pd.DataFrame): summary of weights and bias
+        """
         if 'mcmc_samples' not in dir(self):
             raise Exception("MCMC posterior sampling has not been performed yet.")
         if 'spatial_cov' not in self.args:
@@ -244,7 +252,7 @@ class Point_Process_Model:
         f_t_post=self.mcmc_samples["f_t"]
         f_t_post_mean=jnp.mean(f_t_post, axis=0)
         
-        fig,ax=plt.subplots(1,1,figsize=(5,5))
+        fig,ax=plt.subplots(1,1,figsize=(8,5))
         event_time_height = np.ones(len(self.args['t_events']))*(f_t_post_mean.min()-f_t_post_mean.var()**0.5/4)
         ax.plot(self.args['t_events'], event_time_height,'+',color="red", label="observed times")
         ax.set_ylabel('$f_t$')
