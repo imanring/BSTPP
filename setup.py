@@ -15,10 +15,10 @@ setup(
     author_email='isaacamanring@gmail.com',
     
     install_requires=modules,
-    packages=['BSTPP'],
+    packages=['bstpp'],
     
-    licence = 'MIT',
-    py_modules=['BSTPP'],
+    license = 'MIT',
+    py_modules=['bstpp'],
     description="Bayesian Spatiotemporal Point Process",
     long_description=desc,
 )
