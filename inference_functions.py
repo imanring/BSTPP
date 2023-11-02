@@ -20,7 +20,7 @@ def spatiotemporal_hawkes_model(args):
       spatial_cov = args['spatial_cov']
     N=t_events.shape[0]
 
-    if args['background'] in ['constant','Hawkes']:     
+    if args['model'] == 'hawkes':     
       a_0 = numpyro.sample("a_0", dist.Normal(0,3))
       if 'spatial_cov' in args:
         w = numpyro.sample("w", dist.Normal(jnp.zeros(args['num_cov']),jnp.ones(args["num_cov"])))
@@ -34,10 +34,10 @@ def spatiotemporal_hawkes_model(args):
         mu_xyt_events = mu_xyt[args["indices_xy"]]
       else:
         Itot_txy_back = numpyro.deterministic("Itot_txy_back",mu_xyt*args['T'])
-        mu_xyt_events = jnp.ones(len(xy_events))*mu_xyt
+        mu_xyt_events = mu_xyt
 
     ####### LGCP BACKGROUND
-    if args['background']=='LGCP':
+    if args['model']=='cox_hawkes':
       # Intercept of linear combination
       a_0 = numpyro.sample("a_0", dist.Normal(0,2))
       
@@ -101,9 +101,9 @@ def spatiotemporal_hawkes_model(args):
     l_hawkes_sum=alpha*beta/(2*jnp.pi*jnp.sqrt(sigmax_2*sigmay_2))*jnp.exp(-beta*T_diff-0.5*S_diff_sq)
     l_hawkes = numpyro.deterministic('l_hawkes',jnp.sum(jnp.tril(l_hawkes_sum,-1),1))
 
-    if args['background'] in ['Hawkes','constant']:
+    if args['model'] == 'hawkes':
       ell_1=numpyro.deterministic('ell_1',jnp.sum(jnp.log(l_hawkes+mu_xyt_events)))
-    elif args['background']=='LGCP':
+    elif args['model']=='cox_hawkes':
       if 'spatial_cov':
         b = b_0[args["indices_xy"]]
       else:
@@ -155,7 +155,7 @@ def spatiotemporal_LGCP_model(args):
     if 'spatial_cov' in args:
       # weights for linear combination
       w = numpyro.sample("w", dist.Normal(jnp.zeros(args['num_cov']),jnp.ones(args["num_cov"])))
-      b_0 = numpyro.deterministic("b_0", spatial_cov @ w)
+      b_0 = numpyro.deterministic("b_0", args['spatial_cov'] @ w)
       #b_0 should be 25^2 vector
     else:
       b_0 = 0

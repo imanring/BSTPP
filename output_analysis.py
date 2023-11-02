@@ -10,7 +10,7 @@ with open('output.pkl','rb') as f:
     output = pickle.load(f)
 samples = output['samples']
 
-df = pd.read_csv (r'data/pp_data.csv')
+df = pd.read_csv (r'data/spt_data.csv')
 T = 50
 t_events_total=((df['T']-df['T'].min())).to_numpy()
 t_events_total/=t_events_total.max()
@@ -41,7 +41,7 @@ ax[2].set_xlabel("MCMC iterations")
 plt.savefig("output/trig_trace.png")
 
 #trigger parameter posterior histograms
-fig, ax = plt.subplots(1, 3,figsize=(8,3), sharex=False)
+fig, ax = plt.subplots(1, 3,figsize=(8,4), sharex=False)
 plt.suptitle("Trigger Parameter Posteriors")
 ax[0].hist(samples['alpha'])
 ax[0].set_xlabel(r"${\alpha} $")
@@ -94,7 +94,7 @@ p_val = 1-np.vectorize(erf)(abs(z_score)/2**0.5)
 quantiles = np.quantile(w_samps,[0.025,0.975],axis=0)
 w_summary = pd.DataFrame({'Post Mean':mean,'Post Std':std,'z':z_score,'P>|z|':p_val,
               '[0.025':quantiles[0],'0.975]':quantiles[1]},index=cov_names+['a_0'])
-w_summary.to_csv("output/cov_par_summary.csv",index=False)
+w_summary.to_csv("output/cov_par_summary.csv")
 print(w_summary.to_string())
 
 

@@ -13,9 +13,7 @@ from inference_functions import *
 import dill
 
 
-df = pd.read_csv (r'data/pp_data.csv')
-df['X'] = df.X + np.random.normal(scale=4/69,size=len(df.X))
-df['Y'] = df.Y + np.random.normal(scale=4/69,size=len(df.Y))
+df = pd.read_csv (r'data/spt_data.csv')
 
 # arguments for model
 args={}
@@ -27,7 +25,7 @@ args['x_min']=0
 args['x_max']=1
 args['y_min']=0
 args['y_max']=1
-args['background']='LGCP'
+args['model']='cox_hawkes'
 
 
 t_events_total=((df['T']-df['T'].min())).to_numpy()
@@ -48,7 +46,7 @@ y_events_total
 xy_events_total=np.array((x_events_total,y_events_total)).transpose()
 
 
-if args['background']=='LGCP':
+if args['model']=='cox_hawkes':
   rng_key, rng_key_predict = random.split(random.PRNGKey(10))
 
   n_t=50
@@ -95,7 +93,7 @@ with open('decoders/decoder_1d_T50_fixed_ls', 'rb') as file:
 args["decoder_params_temporal"] = decoder_params
 
 n=n_xy
-if args['background']=='LGCP':
+if args['model']=='cox_hawkes':
   #Load 2d spatial trained decoder
   with open('./decoders/decoder_2d_n25_infer_hyperpars'.format(n_xy), 'rb') as file:
       decoder_params = pickle.load(file)
@@ -145,6 +143,6 @@ output_dict = {}
 output_dict['model']=spatiotemporal_hawkes_model
 output_dict['samples']=mcmc.get_samples()
 output_dict['mcmc']=mcmc
-with open('output.pkl', 'wb') as handle:
+with open('output/output.pkl', 'wb') as handle:
     dill.dump(output_dict, handle)
 

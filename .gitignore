@@ -1,4 +1,6 @@
 __pycache__/
 data/
-output.pkl
+**/output.pkl
 **/.ipynb_checkpoints/
+*.ipynb
+test/
