@@ -116,10 +116,16 @@ class Point_Process_Model:
             
             if interpolation:
                 #scale locations to computation grid
-                spatial_locs = (spatial_cov[['X','Y']].values - A[:,0])/(A[:,1]-A[:,0])                
+                spatial_locs = (spatial_cov[['X','Y']].values - A[:,0])/(A[:,1]-A[:,0])
                 interp = CloughTocher2DInterpolator(spatial_locs,spatial_cov[self.cov_names].values)
                 #interpolate to center of grid cell.
-                X_s = interp(x_xy+0.5/n_xy)
+                #allow a slight bit of tolerance at the edges
+                g = np.asarray(x_xy)+0.5/n_xy
+                too_big = g>=1.0-0.5/n_xy
+                too_small = g<=0.5/n_xy
+                g[too_big] -= 1e-7
+                g[too_small] += 1e-7
+                X_s = interp(g)
                 if np.isnan(X_s).any():
                     raise Exception("The convex hull of spatial covariates must encompass every computational grid cell center.")
             else:
