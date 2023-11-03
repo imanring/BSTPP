@@ -129,7 +129,7 @@ class Point_Process_Model:
                           "sigmax_2": dist.HalfNormal(1),
                          }
         
-        for par, prior in kwargs:
+        for par, prior in priors:
             if par in default_priors:
                 default_priors[par] = prior
             else:
