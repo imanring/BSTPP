@@ -3,6 +3,7 @@ import os
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from scipy.interpolate import CloughTocher2DInterpolator
 from math import erf, ceil
 import warnings 
 import dill
@@ -25,13 +26,16 @@ class Point_Process_Model:
         Parameters:
             data (str or pd.DataFrame): either file path or DataFrame containing spatiotemporal data
                 columns must include 'X', 'Y', 'T'
-            A (tuple ((float,float),(float,float)) ): spatial region of interest. 
-                First tuple is the x-range, second tuple is y-range
+            A (np.array [2x2]): spatial region of interest. 
+                First row is the x-range, second row is y-range
             model (str): one of ['cox_hawkes','lgcp','hawkes']
-            spatial_cov (str,pd.DataFrame): either file path or DataFrame containing spatial covariates
-                if interpolation is false there must be exactly 625 rows corresponding to the spatial grid cells
-            interpolation (bool): interpolate covariates to center of covariate grid cells. **Not Implemented**
-            priors (key word arguments): priors for parameters (a_0,w,alpha,beta,sigmax_2). Must be a numpyro distribution
+            spatial_cov (str,pd.DataFrame): either file path or DataFrame containing spatial covariates.
+                The first 2 columns must be 'X', 'Y'.
+                If interpolation is false there must be exactly 625 rows corresponding to the spatial grid cells.
+            interpolation (bool): interpolate covariates to center of covariate grid cells.
+                All centers of computational grid cells must be within the convex hull of spatial_cov
+            priors (key word arguments): priors for parameters (a_0,w,alpha,beta,sigmax_2). 
+                Must be a numpyro distribution
         """
         if type(data)==str:
             df = pd.read_csv(data)
@@ -93,16 +97,12 @@ class Point_Process_Model:
         args["hidden_dim2_spatial"]= 30
         args["z_dim_spatial"]=10
         
-        n=n_xy
         if args['model'] in ['lgcp','cox_hawkes']:
             decoder_params = pickle.loads(pkgutil.get_data(__name__, "decoders/decoder_1d_T50_fixed_ls"))
-            #with open('decoders/decoder_1d_T50_fixed_ls', 'rb') as file:
-            #    decoder_params = pickle.load(file)
-            args["decoder_params_temporal"] = decoder_params#Load 2d spatial trained decoder
+            args["decoder_params_temporal"] = decoder_params
             
+            #Load 2d spatial trained decoder
             decoder_params = pickle.loads(pkgutil.get_data(__name__, "decoders/decoder_2d_n25_infer_hyperpars"))
-            #with open('./decoders/decoder_2d_n25_infer_hyperpars'.format(n_xy), 'rb') as file:
-            #    decoder_params = pickle.load(file)
             args["decoder_params_spatial"] = decoder_params
         
         args["t_events"]=t_events_total
@@ -111,10 +111,21 @@ class Point_Process_Model:
         if spatial_cov is not None:
             if type(spatial_cov)==str:
                 spatial_cov = pd.read_csv(spatial_cov)
+            args['num_cov'] = len(spatial_cov.columns)-2
+            self.cov_names = list(spatial_cov.columns[2:])
+            
+            if interpolation:
+                #scale locations to computation grid
+                spatial_locs = (spatial_cov[['X','Y']].values - A[:,0])/(A[:,1]-A[:,0])                
+                interp = CloughTocher2DInterpolator(spatial_locs,spatial_cov[self.cov_names].values)
+                #interpolate to center of grid cell.
+                X_s = interp(x_xy+0.5/n_xy)
+                if np.isnan(X_s).any():
+                    raise Exception("The convex hull of spatial covariates must encompass every computational grid cell center.")
+            else:
+                X_s = spatial_cov[self.cov_names].values
             # standardize covariates
-            args['spatial_cov'] = (spatial_cov.values-spatial_cov.values.mean(axis=0))/(spatial_cov.values.var(axis=0)**0.5)
-            args['num_cov'] = len(spatial_cov.columns)
-            self.cov_names = list(spatial_cov.columns)
+            args['spatial_cov'] = (X_s-X_s.mean(axis=0))/(X_s.var(axis=0)**0.5)
             
         if False:
             args['spatial_grid_cells'] = np.setdiff1d(np.arange(25**2),
