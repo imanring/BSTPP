@@ -13,7 +13,7 @@ import jax.numpy as jnp
 from jax import random
 import numpyro.distributions as dist
 
-from utils import * 
+from bstpp.utils import * 
 from inference_functions import *
 
 
