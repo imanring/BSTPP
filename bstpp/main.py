@@ -122,7 +122,7 @@ class Point_Process_Model:
         else:
             args['spatial_grid_cells'] = np.arange(25**2)
 
-        default_priors = {"a_0": dist.Normal(2,2) if model=='lgcp' else dist.Normal(0,3),
+        default_priors = {"a_0": dist.Normal(0,3),
                           "w": dist.Normal(jnp.zeros(args['num_cov']),jnp.ones(args["num_cov"])),
                           "alpha": dist.HalfNormal(0.5),
                           "beta": dist.HalfNormal(0.3),
@@ -133,7 +133,7 @@ class Point_Process_Model:
             if par in default_priors:
                 default_priors[par] = prior
             else:
-                warnings.warn(f'Warning: {par} prior is not being used. There is no such parameter.') 
+                warnings.warn(f'\"{par}\" prior is not being used. There is no such parameter in the model.') 
         args['priors'] = default_priors
         
         self.args = args
