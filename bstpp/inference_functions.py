@@ -21,9 +21,9 @@ def spatiotemporal_hawkes_model(args):
     N=t_events.shape[0]
 
     if args['model'] == 'hawkes':     
-      a_0 = numpyro.sample("a_0", dist.Normal(0,3))
+      a_0 = numpyro.sample("a_0", args['priors']['a_0'])
       if 'spatial_cov' in args:
-        w = numpyro.sample("w", dist.Normal(jnp.zeros(args['num_cov']),jnp.ones(args["num_cov"])))
+        w = numpyro.sample("w", args['priors']['w'])
         b_0 = numpyro.deterministic("b_0", spatial_cov @ w)
       else:
         b_0=0
@@ -39,7 +39,7 @@ def spatiotemporal_hawkes_model(args):
     ####### LGCP BACKGROUND
     if args['model']=='cox_hawkes':
       # Intercept of linear combination
-      a_0 = numpyro.sample("a_0", dist.Normal(0,2))
+      a_0 = numpyro.sample("a_0", args['priors']['a_0'])
       
       # Generate gaussian vector to feed into VAE
       z_temporal = numpyro.sample("z_temporal", 
@@ -59,7 +59,7 @@ def spatiotemporal_hawkes_model(args):
 
       if 'spatial_cov' in args:
         # weights for linear combination
-        w = numpyro.sample("w", dist.Normal(jnp.zeros(args['num_cov']),jnp.ones(args["num_cov"])))
+        w = numpyro.sample("w", args['priors']['w'])
         b_0 = numpyro.deterministic("b_0", spatial_cov @ w)
         #b_0 should be 25^2 vector
       else:
@@ -84,11 +84,11 @@ def spatiotemporal_hawkes_model(args):
 
     #### EXPONENTIAL KERNEL for the excitation part
     #temporal exponential kernel parameters
-    alpha = numpyro.sample("alpha", dist.HalfNormal(0.5))
-    beta = numpyro.sample("beta", dist.HalfNormal(0.3))
+    alpha = numpyro.sample("alpha", args['priors']['alpha'])
+    beta = numpyro.sample("beta", args['priors']['beta'])
     
     #spatial gaussian kernel parameters     
-    sigmax_2 = numpyro.sample("sigmax_2", dist.HalfNormal(1))
+    sigmax_2 = numpyro.sample("sigmax_2", args['priors']['sigmax_2'])
     sigmay_2 = sigmax_2
     
     
@@ -139,7 +139,7 @@ def spatiotemporal_LGCP_model(args):
     n_obs=t_events.shape[0]
     
     #temporal rate
-    a_0 = numpyro.sample("a_0", dist.Normal(2, 2))
+    a_0 = numpyro.sample("a_0", args['priors']['a_0'])
     
     #zero mean temporal gp 
     z_temporal = numpyro.sample("z_temporal", dist.Normal(jnp.zeros(args["z_dim_temporal"]), jnp.ones(args["z_dim_temporal"])))
@@ -154,7 +154,7 @@ def spatiotemporal_LGCP_model(args):
     # spatial rate
     if 'spatial_cov' in args:
       # weights for linear combination
-      w = numpyro.sample("w", dist.Normal(jnp.zeros(args['num_cov']),jnp.ones(args["num_cov"])))
+      w = numpyro.sample("w", args['priors']['w'])
       b_0 = numpyro.deterministic("b_0", args['spatial_cov'] @ w)
       #b_0 should be 25^2 vector
     else:

@@ -1,22 +1,25 @@
 # general libraries
 import os
 import numpy as np
-import pickle
+import pandas as pd
 import matplotlib.pyplot as plt
 from math import erf, ceil
+import warnings 
+import dill
+import pickle
 
 # JAX
 import jax.numpy as jnp
 from jax import random
+import numpyro.distributions as dist
 
-import pandas as pd
 from utils import * 
 from inference_functions import *
-import dill
+
 
 
 class Point_Process_Model:
-    def __init__(self,data,A,model='cox_hawkes',spatial_cov=None,interpolation=False):
+    def __init__(self,data,A,model='cox_hawkes',spatial_cov=None,interpolation=False,**priors):
         """
         Initialize Model
         Parameters:
@@ -28,6 +31,7 @@ class Point_Process_Model:
             spatial_cov (str,pd.DataFrame): either file path or DataFrame containing spatial covariates
                 if interpolation is false there must be exactly 625 rows corresponding to the spatial grid cells
             interpolation (bool): interpolate covariates to center of covariate grid cells. **Not Implemented**
+            priors (key word arguments): priors for parameters (a_0,w,alpha,beta,sigmax_2). Must be a numpyro distribution
         """
         if type(data)==str:
             df = pd.read_csv(data)
@@ -116,6 +120,20 @@ class Point_Process_Model:
         else:
             args['spatial_grid_cells'] = np.arange(25**2)
 
+        default_priors = {"a_0": dist.Normal(2,2) if model=='lgcp' else dist.Normal(0,3),
+                          "w": dist.Normal(jnp.zeros(args['num_cov']),jnp.ones(args["num_cov"])),
+                          "alpha": dist.HalfNormal(0.5),
+                          "beta": dist.HalfNormal(0.3),
+                          "sigmax_2": dist.HalfNormal(1),
+                         }
+        
+        for par, prior in kwargs:
+            if par in default_priors:
+                default_priors[par] = prior
+            else:
+                warnings.warn(f'Warning: {par} prior is not being used. There is no such parameter.') 
+        args['priors'] = default_priors
+        
         self.args = args
     
     def run_mcmc(self,batch_size=1,num_warmup=500,num_samples=1000,num_chains=1,thinning=1):
