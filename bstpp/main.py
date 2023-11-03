@@ -95,12 +95,12 @@ class Point_Process_Model:
         
         n=n_xy
         if args['model'] in ['lgcp','cox_hawkes']:
-            decoder_params = pickle.load(pkgutil.get_data(__name__, "decoders/decoder_1d_T50_fixed_ls"))
+            decoder_params = pickle.loads(pkgutil.get_data(__name__, "decoders/decoder_1d_T50_fixed_ls"))
             #with open('decoders/decoder_1d_T50_fixed_ls', 'rb') as file:
             #    decoder_params = pickle.load(file)
             args["decoder_params_temporal"] = decoder_params#Load 2d spatial trained decoder
             
-            decoder_params = pickle.load(pkgutil.get_data(__name__, "decoders/decoder_2d_n25_infer_hyperpars"))
+            decoder_params = pickle.loads(pkgutil.get_data(__name__, "decoders/decoder_2d_n25_infer_hyperpars"))
             #with open('./decoders/decoder_2d_n25_infer_hyperpars'.format(n_xy), 'rb') as file:
             #    decoder_params = pickle.load(file)
             args["decoder_params_spatial"] = decoder_params
