@@ -15,7 +15,7 @@ import numpyro.distributions as dist
 
 from .utils import * 
 from .inference_functions import *
-
+import pkgutil
 
 
 class Point_Process_Model:
