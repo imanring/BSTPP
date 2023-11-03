@@ -17,7 +17,7 @@ setup(
     install_requires=modules,
     packages=['bstpp'],
     package_data={'bstpp': ['decoders/*']},
-    data_files = ['decoders/*'],
+    data_files = ['bstpp/decoders/*'],
     
     license = 'MIT',
     py_modules=['bstpp'],
