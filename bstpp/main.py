@@ -14,7 +14,7 @@ from jax import random
 import numpyro.distributions as dist
 
 from bstpp.utils import * 
-from inference_functions import *
+from bstpp.inference_functions import *
 
 
 

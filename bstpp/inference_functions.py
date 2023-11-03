@@ -8,8 +8,8 @@ import numpyro
 import numpyro.distributions as dist
 from numpyro import optim
 from numpyro.infer import Trace_ELBO, MCMC, NUTS, init_to_median
-from utils import difference_matrix, difference_matrix_partial
-from vae_functions import *
+from bstpp.utils import difference_matrix, difference_matrix_partial
+from bstpp.vae_functions import *
 
 
 def spatiotemporal_hawkes_model(args):
