@@ -22,20 +22,22 @@ import pkgutil
 class Point_Process_Model:
     def __init__(self,data,A,model='cox_hawkes',spatial_cov=None,interpolation=False,**priors):
         """
-        Initialize Model
-        Parameters:
-            data (str or pd.DataFrame): either file path or DataFrame containing spatiotemporal data
-                columns must include 'X', 'Y', 'T'
-            A (np.array [2x2]): spatial region of interest. 
-                First row is the x-range, second row is y-range
-            model (str): one of ['cox_hawkes','lgcp','hawkes']
-            spatial_cov (str,pd.DataFrame): either file path or DataFrame containing spatial covariates.
-                The first 2 columns must be 'X', 'Y'.
-                If interpolation is false there must be exactly 625 rows corresponding to the spatial grid cells.
-            interpolation (bool): interpolate covariates to center of covariate grid cells.
-                All centers of computational grid cells must be within the convex hull of spatial_cov
-            priors (key word arguments): priors for parameters (a_0,w,alpha,beta,sigmax_2). 
-                Must be a numpyro distribution
+        Spatiotemporal Point Process Model.
+
+        Parameters
+        ----------
+        data: str or pd.DataFrame
+            either file path or DataFrame containing spatiotemporal data. Columns must include 'X', 'Y', 'T'.
+        A: np.array [2x2]
+            Spatial region of interest. First row is the x-range, second row is y-range.
+        model: str
+            one of ['cox_hawkes','lgcp','hawkes'].
+        spatial_cov: str,pd.DataFrame
+            Either file path or DataFrame containing spatial covariates. The first 2 columns must be 'X', 'Y'. If interpolation is false there must be exactly 625 rows corresponding to the spatial grid cells.
+        interpolation: bool
+            Interpolate covariates to center of covariate grid cells. All centers of computational grid cells must be within the convex hull of spatial_cov
+        priors: dict
+            priors for parameters (a_0,w,alpha,beta,sigmax_2). Must be a numpyro distribution.
         """
         if type(data)==str:
             df = pd.read_csv(data)
@@ -140,12 +142,13 @@ class Point_Process_Model:
             args['spatial_grid_cells'] = np.arange(25**2)
 
         default_priors = {"a_0": dist.Normal(0,3),
-                          "w": dist.Normal(jnp.zeros(args['num_cov']),jnp.ones(args["num_cov"])),
                           "alpha": dist.HalfNormal(0.5),
                           "beta": dist.HalfNormal(0.3),
                           "sigmax_2": dist.HalfNormal(1),
                          }
-        
+        if 'num_cov' in args:
+            default_priors["w"] = dist.Normal(jnp.zeros(args['num_cov']),jnp.ones(args["num_cov"]))
+            
         for par, prior in priors.items():
             if par in default_priors:
                 default_priors[par] = prior
@@ -155,11 +158,20 @@ class Point_Process_Model:
         
         self.args = args
     
-    def run_mcmc(self,batch_size=1,num_warmup=500,num_samples=1000,num_chains=1,thinning=1):
+    def run_mcmc(self,batch_size=1,num_warmup=500,num_samples=1000,num_chains=1,thinning=1,output_file=None):
         """
-        Run MCMC posterior sampling on model
-        Parameters:
+        Run MCMC posterior sampling on model.
+        
+        Parameters
+        ----------
+        batch_size: int
             See numpyro documentation for description
+        num_warmup: int
+        num_samples: int
+        num_chains: int
+        thinning: int
+        output_file: str
+            File to save output to.
         """
         self.args["batch_size"]= batch_size
         self.args["num_warmup"]= num_warmup
@@ -180,14 +192,18 @@ class Point_Process_Model:
         
         output_dict['samples']=self.mcmc_samples
         output_dict['mcmc']=self.mcmc
-        with open('output/'+self.args['model']+'/output.pkl', 'wb') as handle:
-            dill.dump(output_dict, handle)
+        if output_file is not None:
+            with open(output_file, 'wb') as handle:
+                dill.dump(output_dict, handle)
 
     def plot_trigger_posterior(self,output_file=None):
         """
-        Plot histograms of posterior trigger parameters
-        Parameters:
-            output_file (str): path in which to save plot
+        Plot histograms of posterior trigger parameters.
+        
+        Parameters
+        ----------
+        output_file: str
+            Path in which to save plot.
         """
         if 'mcmc_samples' not in dir(self):
             raise Exception("MCMC posterior sampling has not been performed yet.")
@@ -207,10 +223,14 @@ class Point_Process_Model:
 
     def plot_trigger_time_decay(self,output_file=None,t_units='days'):
         """
-        Plot temporal trigger kernel sample posterior
-        Parameters:
-            output_file (str): path in which to save plot
-            t_units (str): time units of original data
+        Plot temporal trigger kernel sample posterior.
+        
+        Parameters
+        ----------
+        output_file: str
+            Path in which to save plot.
+        t_units: str
+            Time units of original data.
         """
         if 'mcmc_samples' not in dir(self):
             raise Exception("MCMC posterior sampling has not been performed yet.")
@@ -235,12 +255,18 @@ class Point_Process_Model:
 
     def cov_weight_post_summary(self,plot_file=None,summary_file=None):
         """
-        Plot posteriors of weights and bias and save summary of posteriors]
-        Parameters:
-            plot_file (str): path in which to save plot
-            summary_file (str): path in which to save summary
-        Returns:
-            (pd.DataFrame): summary of weights and bias
+        Plot posteriors of weights and bias and save summary of posteriors.
+        
+        Parameters
+        ----------
+        plot_file: str
+            Path in which to save plot.
+        summary_file: str
+            Path in which to save summary
+        Returns
+        -------
+        pd.DataFrame
+            summary of weights and bias
         """
         if 'mcmc_samples' not in dir(self):
             raise Exception("MCMC posterior sampling has not been performed yet.")
@@ -276,9 +302,12 @@ class Point_Process_Model:
     
     def plot_temporal_background(self,output_file=None):
         """
-        Plot mean posterior temporal gaussian process
-        Parameters:
-            output_file (str): path in which to save plot
+        Plot mean posterior temporal gaussian process.
+        
+        Parameters
+        ----------
+        plot_file: str
+            Path in which to save plot.
         """
         if 'mcmc_samples' not in dir(self):
             raise Exception("MCMC posterior sampling has not been performed yet.")
@@ -291,7 +320,8 @@ class Point_Process_Model:
         
         fig,ax=plt.subplots(1,1,figsize=(8,5))
         event_time_height = np.ones(len(self.args['t_events']))*(f_t_post_mean.min()-f_t_post_mean.var()**0.5/4)
-        ax.plot(self.args['t_events'], event_time_height,'+',color="red", label="observed times")
+        ax.plot(self.args['t_events'], event_time_height,'+',color="red", 
+                alpha=.15, label="observed times")
         ax.set_ylabel('$f_t$')
         ax.set_xlabel('t')
         ax.plot(x_t, f_t_post_mean, label="mean estimated $f_t$")
@@ -303,9 +333,13 @@ class Point_Process_Model:
     def plot_spatial_background(self,output_file=None,include_cov=False):
         """
         Plot mean posterior spatial background with/without covariates
-        Parameters:
-            output_file (str): path in which to save plot
-            include_cov (bool): include effects of spatial covariates
+        
+        Parameters
+        ----------
+        output_file: str
+            Path in which to save plot.
+        include_cov: bool
+            Include effects of spatial covariates.
         """
         if 'mcmc_samples' not in dir(self):
             raise Exception("MCMC posterior sampling has not been performed yet.")
@@ -341,7 +375,7 @@ class Point_Process_Model:
                            cmap='viridis', interpolation='none', extent=[0,1,0,1], 
                            origin='lower',vmin=_min, vmax=_max)
         ax[1].plot(self.args["xy_events"][0],self.args["xy_events"][1],'x', 
-                   alpha=.25,color='red',label='true event locations')
+                   alpha=.15,color='red',label='true event locations')
         ax[1].title.set_text(f'Mean Posterior {fig_desc} With Events')
         for i in range(2):
             ax[i].set_xlabel('x')

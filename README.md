@@ -5,15 +5,15 @@ This package provides bayesian inference for three spatiotemporal point process 
 - Hawkes Process
 - Cox Hawkes Process
 
-
 Install with
 ```pip install git+https://github.com/imanring/Cox_Hawkes_Cov.git```
 
+API documentation is in ```bstpp_API_doc.pdf```.
 
 See ```demo.ipynb``` for a demo.
 
 
-This code allows you to do inference on self-exciting point processes with inhomogeneous backgrounds and spatial covariates. It is based on code from [1]. The trained decoders and encoder/decoder functions are provided by Dr Elisaveta Semenova following the proposals in [2]. 
+This repo is based on code from [1]. The trained decoders and encoder/decoder functions are provided by Dr Elisaveta Semenova following the proposals in [2]. 
 
 
 [1] X. Miscouridou, G. Mohler, S. Bhatt, S. Flaxman, S. Mishra, Cox-Hawkes: Doubly stochastic spatiotemporal poisson point process, Transaction of Machine Learning Research, 2023
