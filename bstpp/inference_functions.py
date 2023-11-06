@@ -100,10 +100,10 @@ def spatiotemporal_hawkes_model(args):
     S_mat_x = difference_matrix(xy_events[0])
     S_mat_y = difference_matrix(xy_events[1])
     S_diff_sq=(S_mat_x**2)/sigmax_2+(S_mat_y**2)/sigmay_2;
-    #if args['temp_trig'] == 'exp':
-    temp_kern = beta*jnp.exp(-beta*T_diff)
-    #elif args['temp_trig'] == 'powerlaw':
-    #    temp_kern = theta*beta**theta*jnp.power(T_diff+beta,-1-theta)
+    if args['temp_trig'] == 'exp':
+        temp_kern = beta*jnp.exp(-beta*T_diff)
+    elif args['temp_trig'] == 'powerlaw':
+        temp_kern = theta*beta**theta*jnp.power(T_diff+beta,-1-theta)
     l_hawkes_sum=alpha/(2*jnp.pi*jnp.sqrt(sigmax_2*sigmay_2))*jnp.exp(-0.5*S_diff_sq)*temp_kern
     l_hawkes = numpyro.deterministic('l_hawkes',jnp.sum(jnp.tril(l_hawkes_sum,-1),1))
 
@@ -117,10 +117,10 @@ def spatiotemporal_hawkes_model(args):
       ell_1=numpyro.deterministic('ell_1',jnp.sum(jnp.log(l_hawkes+jnp.exp(a_0 + b + f_t_events+f_xy_events))))
 
     #### hawkes integral
-    #if args['temp_trig'] == 'exp':
-    temp_tot = alpha*(1-jnp.exp(-beta*(T-t_events)))
-    #elif args['temp_trig'] == 'powerlaw':
-    #    temp_tot = alpha*(1-beta**theta/(T-t_events + beta)**theta)
+    if args['temp_trig'] == 'exp':
+        temp_tot = alpha*(1-jnp.exp(-beta*(T-t_events)))
+    elif args['temp_trig'] == 'powerlaw':
+        temp_tot = alpha*(1-beta**theta/(T-t_events + beta)**theta)
     numpyro.deterministic("temp_trig_tot",temp_tot)
 
     
