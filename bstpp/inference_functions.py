@@ -86,6 +86,8 @@ def spatiotemporal_hawkes_model(args):
     #temporal exponential kernel parameters
     alpha = numpyro.sample("alpha", args['priors']['alpha'])
     beta = numpyro.sample("beta", args['priors']['beta'])
+    if args['temp_trig'] == 'powerlaw':
+        theta = numpyro.sample("theta", args['priors']['theta'])
     
     #spatial gaussian kernel parameters     
     sigmax_2 = numpyro.sample("sigmax_2", args['priors']['sigmax_2'])
@@ -97,8 +99,12 @@ def spatiotemporal_hawkes_model(args):
     T_diff=difference_matrix(t_events);
     S_mat_x = difference_matrix(xy_events[0])
     S_mat_y = difference_matrix(xy_events[1])
-    S_diff_sq=(S_mat_x**2)/sigmax_2+(S_mat_y**2)/sigmay_2; 
-    l_hawkes_sum=alpha*beta/(2*jnp.pi*jnp.sqrt(sigmax_2*sigmay_2))*jnp.exp(-beta*T_diff-0.5*S_diff_sq)
+    S_diff_sq=(S_mat_x**2)/sigmax_2+(S_mat_y**2)/sigmay_2;
+    #if args['temp_trig'] == 'exp':
+    temp_kern = beta*jnp.exp(-beta*T_diff)
+    #elif args['temp_trig'] == 'powerlaw':
+    #    temp_kern = theta*beta**theta*jnp.power(T_diff+beta,-1-theta)
+    l_hawkes_sum=alpha/(2*jnp.pi*jnp.sqrt(sigmax_2*sigmay_2))*jnp.exp(-0.5*S_diff_sq)*temp_kern
     l_hawkes = numpyro.deterministic('l_hawkes',jnp.sum(jnp.tril(l_hawkes_sum,-1),1))
 
     if args['model'] == 'hawkes':
@@ -111,8 +117,12 @@ def spatiotemporal_hawkes_model(args):
       ell_1=numpyro.deterministic('ell_1',jnp.sum(jnp.log(l_hawkes+jnp.exp(a_0 + b + f_t_events+f_xy_events))))
 
     #### hawkes integral
-    exponpart = alpha*(1-jnp.exp(-beta*(T-t_events)))
-    numpyro.deterministic("exponpart",exponpart)
+    #if args['temp_trig'] == 'exp':
+    temp_tot = alpha*(1-jnp.exp(-beta*(T-t_events)))
+    #elif args['temp_trig'] == 'powerlaw':
+    #    temp_tot = alpha*(1-beta**theta/(T-t_events + beta)**theta)
+    numpyro.deterministic("temp_trig_tot",temp_tot)
+
     
     s1max=(x_max-xy_events[0])/(jnp.sqrt(2*sigmax_2))
     s1min=(xy_events[0])/(jnp.sqrt(2*sigmax_2))
@@ -125,7 +135,7 @@ def spatiotemporal_hawkes_model(args):
     numpyro.deterministic("gaussianpart",gaussianpart)    
 
     ## total integral
-    Itot_txy=jnp.sum(exponpart*gaussianpart)+Itot_txy_back
+    Itot_txy=jnp.sum(temp_tot*gaussianpart)+Itot_txy_back
     numpyro.deterministic("Itot_txy",Itot_txy)
     loglik=numpyro.deterministic('loglik',ell_1-Itot_txy)
 

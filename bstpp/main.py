@@ -20,7 +20,7 @@ import pkgutil
 
 
 class Point_Process_Model:
-    def __init__(self,data,A,model='cox_hawkes',spatial_cov=None,interpolation=False,**priors):
+    def __init__(self,data,A,spatial_cov=None,interpolation=False,model='cox_hawkes',temp_trig='exp',**priors):
         """
         Spatiotemporal Point Process Model.
 
@@ -30,12 +30,14 @@ class Point_Process_Model:
             either file path or DataFrame containing spatiotemporal data. Columns must include 'X', 'Y', 'T'.
         A: np.array [2x2]
             Spatial region of interest. First row is the x-range, second row is y-range.
-        model: str
-            one of ['cox_hawkes','lgcp','hawkes'].
         spatial_cov: str,pd.DataFrame
             Either file path or DataFrame containing spatial covariates. The first 2 columns must be 'X', 'Y'. If interpolation is false there must be exactly 625 rows corresponding to the spatial grid cells.
         interpolation: bool
             Interpolate covariates to center of covariate grid cells. All centers of computational grid cells must be within the convex hull of spatial_cov
+        model: str
+            one of ['cox_hawkes','lgcp','hawkes'].
+        temp_trig: str
+            one of ['exp','powerlaw'].
         priors: dict
             priors for parameters (a_0,w,alpha,beta,sigmax_2). Must be a numpyro distribution.
         """
@@ -54,6 +56,7 @@ class Point_Process_Model:
         args['y_min']=0
         args['y_max']=1
         args['model']=model
+        args['temp_trig'] = temp_trig
         
         t_events_total=((df['T']-df['T'].min())).to_numpy()
         t_events_total/=t_events_total.max()
@@ -145,6 +148,7 @@ class Point_Process_Model:
                           "alpha": dist.HalfNormal(0.5),
                           "beta": dist.HalfNormal(0.3),
                           "sigmax_2": dist.HalfNormal(1),
+                          "theta": dist.HalfNormal(1),
                          }
         if 'num_cov' in args:
             default_priors["w"] = dist.Normal(jnp.zeros(args['num_cov']),jnp.ones(args["num_cov"]))
