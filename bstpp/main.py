@@ -13,6 +13,7 @@ import pickle
 import jax.numpy as jnp
 from jax import random
 import numpyro.distributions as dist
+from numpyro.diagnostics import hpdi
 
 from .utils import * 
 from .inference_functions import *
@@ -204,6 +205,10 @@ class Point_Process_Model:
         ----------
         output_file: str
             Path in which to save plot.
+        Returns
+        -------
+        pd.DataFrame
+            Summary of trigger parameters.
         """
         if 'mcmc_samples' not in dir(self):
             raise Exception("MCMC posterior sampling has not been performed yet.")
@@ -221,6 +226,18 @@ class Point_Process_Model:
             plt.savefig(output_file)
         plt.show()
 
+        trig_pos = np.concatenate((self.mcmc_samples['alpha'].reshape(-1,1),
+                                  self.mcmc_samples['beta'].reshape(-1,1),
+                                  self.mcmc_samples['sigmax_2'].reshape(-1,1)**0.5),axis=1)
+        mean = trig_pos.mean(axis=0)
+        std = trig_pos.var(axis=0)**0.5
+        z_score = np.asarray(mean/std)
+        p_val = 1-np.vectorize(erf)(abs(z_score)/2**0.5)
+        quantiles = np.quantile(trig_pos,[0.025,0.975],axis=0)
+        trig_summary = pd.DataFrame({'Post Mean':mean,'Post Std':std,'z':z_score,'P>|z|':p_val,
+                      '[0.025':quantiles[0],'0.975]':quantiles[1]},index=['alpha','beta','sigma'])
+        return trig_summary
+    
     def plot_trigger_time_decay(self,output_file=None,t_units='days'):
         """
         Plot temporal trigger kernel sample posterior.
@@ -316,15 +333,18 @@ class Point_Process_Model:
         
         x_t = jnp.arange(0, self.args['T'], self.args['T']/self.args["n_t"])
         f_t_post=self.mcmc_samples["f_t"]
+        f_t_hpdi = hpdi(self.mcmc_samples["f_t"])
         f_t_post_mean=jnp.mean(f_t_post, axis=0)
         
         fig,ax=plt.subplots(1,1,figsize=(8,5))
-        event_time_height = np.ones(len(self.args['t_events']))*(f_t_post_mean.min()-f_t_post_mean.var()**0.5/4)
+        event_time_height = np.ones(len(self.args['t_events']))*f_t_hpdi.min()
+        #np.ones(len(self.args['t_events']))*(f_t_post_mean.min()-f_t_post_mean.var()**0.5/4)
         ax.plot(self.args['t_events'], event_time_height,'+',color="red", 
                 alpha=.15, label="observed times")
         ax.set_ylabel('$f_t$')
         ax.set_xlabel('t')
         ax.plot(x_t, f_t_post_mean, label="mean estimated $f_t$")
+        ax.fill_between(x_t, f_t_hpdi[0], f_t_hpdi[1], alpha=0.4, color="palegoldenrod", label="90%CI rate")
         ax.legend()
         if output_file is not None:
             plt.savefig(output_file)
