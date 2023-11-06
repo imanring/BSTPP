@@ -20,7 +20,7 @@ See ```demo.ipynb``` for a demo.
 The full Cox Hawkes Model is formulated as follows,
 
 
-$\lambda(t,s) = \mu(t,s) + \sum_{i:t_i<t}{\alpha f(t-t_i;\beta) \varphi(s-s_i;\sigma)}$
+$\lambda(t,s) = \mu(t,s) + \sum_{i:t_i < t}{\alpha f(t-t_i;\beta) \varphi(s-s_i;\sigma)}$
 
 
 
@@ -41,6 +41,7 @@ The plain Hawkes background is,
 $\mu(t,s) = exp(a_0 + X(s)w)$
 
 
+### Acknowledgements
 
 This repo is based on code from [1]. The trained decoders and encoder/decoder functions are provided by Dr Elisaveta Semenova following the proposals in [2]. 
 
