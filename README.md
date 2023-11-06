@@ -41,10 +41,10 @@ The Hawkes process is the same with the as the Cox Hawkes, except the background
 $\mu(t,s) = exp(a_0 + X(s)w)$
 
 
-Finally, the Log Gaussian Cox Process has intensity,
+Finally, the Log Gaussian Cox Process is the same as Cox Hawkes except without the self-exciting summation,
 
 
-$\lambda(t,s) = \mu(t,s)$
+$\lambda(t,s) = exp(a_0 + X(s)w + f_s(s) + f_t(t))$
 
 ### Acknowledgements
 
