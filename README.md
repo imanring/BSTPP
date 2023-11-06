@@ -35,11 +35,16 @@ $\mu(t,s) = exp(a_0 + X(s)w + f_s(s) + f_t(t))$
 $X(s)$ is the spatial covariate matrix, and $f_s$ and $f_t$ are gaussian processes.
 
 
-The plain Hawkes background is,
+The Hawkes process is the same with the as the Cox Hawkes, except the background is
 
 
 $\mu(t,s) = exp(a_0 + X(s)w)$
 
+
+Finally, the Log Gaussian Cox Process has intensity,
+
+
+$\lambda(t,s) = \mu(t,s)$
 
 ### Acknowledgements
 
