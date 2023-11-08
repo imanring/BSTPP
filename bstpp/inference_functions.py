@@ -30,8 +30,8 @@ def spatiotemporal_hawkes_model(args):
       mu_xyt=numpyro.deterministic("mu_xyt",jnp.exp(a_0+b_0))
       if 'spatial_cov' in args:
         ind_spatial = args['spatial_grid_cells']
-        Itot_txy_back = numpyro.deterministic("Itot_txy_back",jnp.sum(mu_xyt[ind_spatial])/len(ind_spatial)*args['T'])
-        mu_xyt_events = mu_xyt[args["indices_xy"]]
+        Itot_txy_back = numpyro.deterministic("Itot_txy_back",mu_xyt@args['cov_area']*args['T'])
+        mu_xyt_events = mu_xyt[args["cov_index"]]
       else:
         Itot_txy_back = numpyro.deterministic("Itot_txy_back",mu_xyt*args['T'])
         mu_xyt_events = mu_xyt
@@ -74,9 +74,13 @@ def spatiotemporal_hawkes_model(args):
       f_xy = numpyro.deterministic("f_xy", decoder_nn[1](decoder_params, z_spatial))
 
       # Calculate spatial intensity
-      rate_xy = numpyro.deterministic("rate_xy",jnp.exp(f_xy+b_0))
-      Itot_xy=numpyro.deterministic("Itot_xy", jnp.sum(rate_xy[args['spatial_grid_cells']])/args["n_xy"]**2)
-      f_xy_events=f_xy[args["indices_xy"]]
+      rate_xy = numpyro.deterministic("rate_xy",jnp.exp(f_xy))
+      if 'spatial_cov' in args:
+          spatial_integral = jnp.exp(b_0[args['int_df']['cov_ind']] + f_xy[args['int_df']['comp_grid_id']]) @ args['int_df']['area'].values
+      else:
+          spatial_integral = jnp.sum(rate_xy[args['spatial_grid_cells']])/args["n_xy"]**2
+      Itot_xy=numpyro.deterministic("Itot_xy", spatial_integral)
+      f_xy_events=f_xy[args["indices_xy"]] + b_0[args['cov_ind']]
       
       #Calculate total background integral
       Itot_txy_back=numpyro.deterministic("Itot_txy_back",Itot_t*Itot_xy)

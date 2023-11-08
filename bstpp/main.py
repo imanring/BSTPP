@@ -135,7 +135,23 @@ class Point_Process_Model:
                 X_s = spatial_cov[self.cov_names].values
             # standardize covariates
             args['spatial_cov'] = (X_s-X_s.mean(axis=0))/(X_s.var(axis=0)**0.5)
+            #find cov ind
+            #find cov cell intersection with computational grid cells area
+            cols = np.arange(0, 1, 1/n_xy)
+            polygons = []
+            for y in cols:
+                for x in cols:
+                    polygons.append(Polygon([(x,y), (x+1/n_xy, y), (x+1/n_xy, y+1/n_xy), (x, y+1/n_xy)]))
+            comp_grid = gpd.GeoDataFrame({'geometry':polygons,'comp_grid_id':np.arange(n_xy**2)})
+            comp_grid.geometry = comp_grid.geometry.scale(xfact=A[0,1]-A[0,0],yfact=A[1,1]-A[1,0],
+                                                          origin=(0,0)).translate(A[0,0],A[1,1])
+            comp_grid.crs = spatial_cov.crs
             
+            intersect = gpd.overlay(comp_grid, spatial_cov, how='intersection')
+            intersect['area'] = intersect.area/((A[0,1]-A[0,0])*(A[1,1]-A[1,0]))
+            
+            args['int_df'] = intersect
+        
         if False:
             args['spatial_grid_cells'] = np.setdiff1d(np.arange(25**2),
                                                       array([0,1,2,3,4,10,25,26,27,28,50,51,52,53,75,76,77]))
