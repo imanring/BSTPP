@@ -78,22 +78,32 @@ class Point_Process_Model:
         n_t=50
         T=50
         x_t = jnp.arange(0, T, T/n_t)
-        args[ "n_t"]=n_t
+        args["n_t"]=n_t
         args["x_t"]=x_t
         
         n_xy = 25
-        grid = jnp.arange(0, 1, 1/n_xy)
-        u, v = jnp.meshgrid(grid, grid)
-        x_xy = jnp.array([u.flatten(), v.flatten()]).transpose((1, 0))
-        args['x_xy']=x_xy
+        cols = np.arange(0, 1, 1/n_xy)
+        polygons = []
+        for y in cols:
+            for x in cols:
+                polygons.append(Polygon([(x,y), (x+1/n_xy, y), (x+1/n_xy, y+1/n_xy), (x, y+1/n_xy)]))
+        comp_grid = gpd.GeoDataFrame({'geometry':polygons,'comp_grid_id':np.arange(n_xy**2)})
+        comp_grid.geometry = comp_grid.geometry.scale(xfact=A[0,1]-A[0,0],yfact=A[1,1]-A[1,0],
+                                                      origin=(0,0)).translate(A[0,0],A[1,0])
+        geometry = gpd.points_from_xy(df.X, df.Y)
+        self.points = gpd.GeoDataFrame(data=df,geometry=geometry)
+        args['indices_xy'] = self.points.sjoin(comp_grid)['comp_grid_id'].values
+        
+        #grid = jnp.arange(0, 1, 1/n_xy)
+        #u, v = jnp.meshgrid(grid, grid)
+        #x_xy = jnp.array([u.flatten(), v.flatten()]).transpose((1, 0))
+        #args['x_xy']=x_xy
         args["n_xy"]= n_xy
         
         args["gp_kernel"]=exp_sq_kernel
         
-        indices_t=find_index(t_events_total, x_t)
-        indices_xy=find_index(xy_events_total, x_xy)
-        args['indices_t']=indices_t
-        args['indices_xy']=indices_xy
+        args['indices_t']=np.searchsorted(x_t, t_events_total, side='right')-1
+        
         
         # temporal VAE training arguments
         args["hidden_dim_temporal"]= 35
@@ -137,8 +147,7 @@ class Point_Process_Model:
                 spatial_cov = gpd.GeoDataFrame(data=spatial_cov,geometry=polygons)
             spatial_cov['cov_ind'] = np.arange(len(spatial_cov))
             #find covariate cell index for each point
-            geometry = gpd.points_from_xy(df.X, df.Y, crs=spatial_cov.crs)
-            self.points = gpd.GeoDataFrame(data=df,geometry=geometry)
+            self.points.crs = spatial_cov.crs
             args['cov_ind'] = self.points.sjoin(spatial_cov)['cov_ind'].values
             
             args['num_cov'] = len(cov_names)
@@ -151,23 +160,14 @@ class Point_Process_Model:
             
             #Create Computational Grid GeoDataFrame
             if args['model'] in ['lgcp','cox_hawkes']:
-                cols = np.arange(0, 1, 1/n_xy)
-                polygons = []
-                for y in cols:
-                    for x in cols:
-                        polygons.append(Polygon([(x,y), (x+1/n_xy, y), (x+1/n_xy, y+1/n_xy), (x, y+1/n_xy)]))
-                comp_grid = gpd.GeoDataFrame({'geometry':polygons,'comp_grid_id':np.arange(n_xy**2)})
-                comp_grid.geometry = comp_grid.geometry.scale(xfact=A[0,1]-A[0,0],yfact=A[1,1]-A[1,0],
-                                                              origin=(0,0)).translate(A[0,0],A[1,0])
                 comp_grid.crs = spatial_cov.crs
-                
                 self.comp_grid = comp_grid
                             
                 #find covariate cell intersection with computational grid cells area
                 intersect = gpd.overlay(comp_grid, spatial_cov, how='intersection')
                 intersect['area'] = intersect.area/((A[0,1]-A[0,0])*(A[1,1]-A[1,0]))
+                intersect = intersect[intersect['area']>1e-10]
                 args['int_df'] = intersect
-    
                 #find cells on the computational grid that are in the domain
                 args['spatial_grid_cells'] = np.unique(comp_grid.sjoin(spatial_cov, how='inner')['comp_grid_id'])
 
