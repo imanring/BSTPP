@@ -20,7 +20,7 @@ def spatiotemporal_hawkes_model(args):
       spatial_cov = args['spatial_cov']
     N=t_events.shape[0]
 
-    if args['model'] == 'hawkes':     
+    if args['model'] == 'hawkes':
       a_0 = numpyro.sample("a_0", args['priors']['a_0'])
       if 'spatial_cov' in args:
         w = numpyro.sample("w", args['priors']['w'])
