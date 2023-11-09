@@ -61,7 +61,6 @@ def spatiotemporal_hawkes_model(args):
         # weights for linear combination
         w = numpyro.sample("w", args['priors']['w'])
         b_0 = numpyro.deterministic("b_0", spatial_cov @ w)
-        #b_0 should be 25^2 vector
       else:
        # zero mean spatial gp
        b_0 = 0
@@ -76,9 +75,9 @@ def spatiotemporal_hawkes_model(args):
       # Calculate spatial intensity
       rate_xy = numpyro.deterministic("rate_xy",jnp.exp(f_xy))
       if 'spatial_cov' in args:
-          spatial_integral = jnp.exp(b_0[args['int_df']['cov_ind']] + f_xy[args['int_df']['comp_grid_id']]) @ args['int_df']['area'].values
+          spatial_integral = jnp.exp(b_0[args['int_df']['cov_ind'].values] + f_xy[args['int_df']['comp_grid_id'].values]) @ args['int_df']['area'].values
       else:
-          spatial_integral = jnp.sum(rate_xy[args['spatial_grid_cells']])/args["n_xy"]**2
+          spatial_integral = jnp.mean(rate_xy[args['spatial_grid_cells']])
       Itot_xy=numpyro.deterministic("Itot_xy", spatial_integral)
       f_xy_events=f_xy[args["indices_xy"]] + b_0[args['cov_ind']]
       
@@ -160,7 +159,6 @@ def spatiotemporal_LGCP_model(args):
       # weights for linear combination
       w = numpyro.sample("w", args['priors']['w'])
       b_0 = numpyro.deterministic("b_0", args['spatial_cov'] @ w)
-      #b_0 should be 25^2 vector
     else:
       b_0 = 0
     
@@ -169,9 +167,13 @@ def spatiotemporal_LGCP_model(args):
     decoder_nn = vae_decoder_spatial(args["hidden_dim2_spatial"], args["hidden_dim1_spatial"], args["n_xy"])  
     decoder_params = args["decoder_params_spatial"]
     f_xy = numpyro.deterministic("f_xy", decoder_nn[1](decoder_params, z_spatial))
-    rate_xy = numpyro.deterministic("rate_xy",jnp.exp(f_xy+b_0))
-    Itot_xy=numpyro.deterministic("Itot_xy", jnp.sum(rate_xy)/args["n_xy"]**2)
-    f_xy_i= jnp.log(rate_xy[args["indices_xy"]])
+    rate_xy = numpyro.deterministic("rate_xy",jnp.exp(f_xy))
+    if 'spatial_cov' in args:
+        spatial_integral = jnp.exp(b_0[args['int_df']['cov_ind'].values] + f_xy[args['int_df']['comp_grid_id'].values]) @ args['int_df']['area'].values
+    else:
+      spatial_integral = jnp.mean(rate_xy[args['spatial_grid_cells']])
+    Itot_xy=numpyro.deterministic("Itot_xy", spatial_integral)
+    f_xy_i=f_xy[args["indices_xy"]] + b_0[args['cov_ind']]
 
     loglik=jnp.sum(f_t_i+f_xy_i+a_0)
     I_tot_txy=numpyro.deterministic("I_tot_txy",Itot_xy*Itot_t)
