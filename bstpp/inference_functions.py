@@ -31,7 +31,7 @@ def spatiotemporal_hawkes_model(args):
       if 'spatial_cov' in args:
         ind_spatial = args['spatial_grid_cells']
         Itot_txy_back = numpyro.deterministic("Itot_txy_back",mu_xyt@args['cov_area']*args['T'])
-        mu_xyt_events = mu_xyt[args["cov_index"]]
+        mu_xyt_events = mu_xyt[args["cov_ind"]]
       else:
         Itot_txy_back = numpyro.deterministic("Itot_txy_back",mu_xyt*args['T'])
         mu_xyt_events = mu_xyt

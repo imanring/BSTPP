@@ -21,7 +21,7 @@ import pkgutil
 
 
 class Point_Process_Model:
-    def __init__(self,data,A,model='cox_hawkes',spatial_cov=None,interpolation=False,**priors):
+    def __init__(self,data,A,model='cox_hawkes',spatial_cov=None,cov_names=None,cov_grid_size=None,**priors):
         """
         Spatiotemporal Point Process Model.
 
@@ -33,10 +33,13 @@ class Point_Process_Model:
             Spatial region of interest. First row is the x-range, second row is y-range.
         model: str
             one of ['cox_hawkes','lgcp','hawkes'].
-        spatial_cov: str,pd.DataFrame
-            Either file path or DataFrame containing spatial covariates. The first 2 columns must be 'X', 'Y'. If interpolation is false there must be exactly 625 rows corresponding to the spatial grid cells.
-        interpolation: bool
-            Interpolate covariates to center of covariate grid cells. All centers of computational grid cells must be within the convex hull of spatial_cov
+        spatial_cov: str,pd.DataFrame,gpd.GeoDataFrame
+            Either file path (.csv or .shp), DataFrame, or GeoDataFrame containing spatial covariates. Spatial covariates must cover all the points in data.
+            If spatial_cov is a csv or pd.DataFrame, the first 2 columns must be 'X', 'Y' and cov_grid_size must be specified.
+        cov_names: list
+            List of covariate names. Must all be columns in spatial_cov.
+        cov_grid_size: list-like
+            Spatial covariate grid (width, height).
         priors: dict
             priors for parameters (a_0,w,alpha,beta,sigmax_2). Must be a numpyro distribution.
         """
@@ -112,31 +115,33 @@ class Point_Process_Model:
         args["xy_events"]=xy_events_total.transpose()
 
         if spatial_cov is not None:
+            #convert input into geopandas dataframe.
             if type(spatial_cov)==str:
-                spatial_cov = pd.read_csv(spatial_cov)
-            args['num_cov'] = len(spatial_cov.columns)-2
-            self.cov_names = list(spatial_cov.columns[2:])
+                if spatial_cov[-4:] == '.shp':
+                    spatial_cov = gpd.read_file(spatial_cov)
+                else:
+                    spatial_cov = pd.read_csv(spatial_cov)
+            if type(spatial_cov) == pd.DataFrame:
+                polygons = []
+                for i in spatial_cov.index:
+                    polygons.append(Polygon([(spatial_cov.loc[i,'X']-cov_grid_size[0]/2,
+                                              spatial_cov.loc[i,'Y']-cov_grid_size[1]/2), 
+                                             (spatial_cov.loc[i,'X']+cov_grid_size[0]/2,
+                                              spatial_cov.loc[i,'Y']-cov_grid_size[1]/2), 
+                                             (spatial_cov.loc[i,'X']+cov_grid_size[0]/2,
+                                              spatial_cov.loc[i,'Y']+cov_grid_size[1]/2), 
+                                             (spatial_cov.loc[i,'X']-cov_grid_size[0]/2,
+                                              spatial_cov.loc[i,'Y']+cov_grid_size[1]/2)]))
+                spatial_cov = gpd.GeoDataFrame(data=spatial_cov,geometry=polygons)
             
-            if interpolation:
-                #scale locations to computation grid
-                spatial_locs = (spatial_cov[['X','Y']].values - A[:,0])/(A[:,1]-A[:,0])
-                interp = CloughTocher2DInterpolator(spatial_locs,spatial_cov[self.cov_names].values)
-                #interpolate to center of grid cell.
-                #allow a slight bit of tolerance at the edges
-                g = np.asarray(x_xy)+0.5/n_xy
-                too_big = g>=1.0-0.5/n_xy
-                too_small = g<=0.5/n_xy
-                g[too_big] -= 1e-7
-                g[too_small] += 1e-7
-                X_s = interp(g)
-                if np.isnan(X_s).any():
-                    raise Exception("The convex hull of spatial covariates must encompass every computational grid cell center.")
-            else:
-                X_s = spatial_cov[self.cov_names].values
+            args['num_cov'] = len(cov_names)
+            self.cov_names = cov_names
+            
+            X_s = spatial_cov[self.cov_names].values
             # standardize covariates
             args['spatial_cov'] = (X_s-X_s.mean(axis=0))/(X_s.var(axis=0)**0.5)
-            #find cov ind
-            #find cov cell intersection with computational grid cells area
+            
+            #Create Computational Grid GeoDataFrame
             cols = np.arange(0, 1, 1/n_xy)
             polygons = []
             for y in cols:
@@ -147,14 +152,19 @@ class Point_Process_Model:
                                                           origin=(0,0)).translate(A[0,0],A[1,1])
             comp_grid.crs = spatial_cov.crs
             
+            spatial_cov['cov_ind'] = np.arange(len(spatial_cov))
+            #find covariate cell index for each point
+            geometry = gpd.points_from_xy(df.X, df.Y, crs=spatial_cov.crs)
+            points = gpd.GeoDataFrame(data=df,geometry=geometry)
+            args['cov_ind'] = points.sjoin(spatial_cov)['cov_ind']
+            
+            #find covariate cell intersection with computational grid cells area
             intersect = gpd.overlay(comp_grid, spatial_cov, how='intersection')
             intersect['area'] = intersect.area/((A[0,1]-A[0,0])*(A[1,1]-A[1,0]))
-            
             args['int_df'] = intersect
-        
-        if False:
-            args['spatial_grid_cells'] = np.setdiff1d(np.arange(25**2),
-                                                      array([0,1,2,3,4,10,25,26,27,28,50,51,52,53,75,76,77]))
+
+            #find cells on the computational grid that are in the domain
+            args['spatial_grid_cells'] = comp_grid.sjoin(spatial_cov, how='inner')['comp_grid_id'].values
         else:
             args['spatial_grid_cells'] = np.arange(25**2)
 
@@ -165,7 +175,7 @@ class Point_Process_Model:
                          }
         if 'num_cov' in args:
             default_priors["w"] = dist.Normal(jnp.zeros(args['num_cov']),jnp.ones(args["num_cov"]))
-            
+        
         for par, prior in priors.items():
             if par in default_priors:
                 default_priors[par] = prior
