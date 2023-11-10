@@ -15,23 +15,19 @@ from .vae_functions import *
 def spatiotemporal_hawkes_model(args):
     t_events=args["t_events"]
     xy_events=args["xy_events"]
-    if 'spatial_cov' in args:
-      #spatial_cov is [25^2,num_cov] matrix
-      spatial_cov = args['spatial_cov']
     N=t_events.shape[0]
 
     if args['model'] == 'hawkes':
       a_0 = numpyro.sample("a_0", args['priors']['a_0'])
       if 'spatial_cov' in args:
         w = numpyro.sample("w", args['priors']['w'])
-        b_0 = numpyro.deterministic("b_0", spatial_cov @ w)
+        b_0 = numpyro.deterministic("b_0", args['spatial_cov'] @ w)
       else:
         b_0=0
       mu_xyt=numpyro.deterministic("mu_xyt",jnp.exp(a_0+b_0))
       if 'spatial_cov' in args:
-        ind_spatial = args['spatial_grid_cells']
-        Itot_txy_back = numpyro.deterministic("Itot_txy_back",jnp.sum(mu_xyt[ind_spatial])/len(ind_spatial)*args['T'])
-        mu_xyt_events = mu_xyt[args["indices_xy"]]
+        Itot_txy_back = numpyro.deterministic("Itot_txy_back",mu_xyt@args['cov_area']*args['T'])
+        mu_xyt_events = mu_xyt[args["cov_ind"]]
       else:
         Itot_txy_back = numpyro.deterministic("Itot_txy_back",mu_xyt*args['T'])
         mu_xyt_events = mu_xyt
@@ -57,26 +53,27 @@ def spatiotemporal_hawkes_model(args):
       # Temporal part of log(mu(t,s))
       f_t_events=f_t[args["indices_t"]]
 
-      if 'spatial_cov' in args:
-        # weights for linear combination
-        w = numpyro.sample("w", args['priors']['w'])
-        b_0 = numpyro.deterministic("b_0", spatial_cov @ w)
-        #b_0 should be 25^2 vector
-      else:
-       # zero mean spatial gp
-       b_0 = 0
-
       # Generate gaussian vector to feed into VAE
       z_spatial = numpyro.sample("z_spatial", dist.Normal(jnp.zeros(args["z_dim_spatial"]), jnp.ones(args["z_dim_spatial"])))
       decoder_nn = vae_decoder_spatial(args["hidden_dim2_spatial"], args["hidden_dim1_spatial"], args["n_xy"])  
       decoder_params = args["decoder_params_spatial"]
       # Generate Gaussian Process from VAE
       f_xy = numpyro.deterministic("f_xy", decoder_nn[1](decoder_params, z_spatial))
-
-      # Calculate spatial intensity
-      rate_xy = numpyro.deterministic("rate_xy",jnp.exp(f_xy+b_0))
-      Itot_xy=numpyro.deterministic("Itot_xy", jnp.sum(rate_xy[args['spatial_grid_cells']])/args["n_xy"]**2)
       f_xy_events=f_xy[args["indices_xy"]]
+      
+      # Calculate spatial intensity
+      if 'spatial_cov' in args:
+          # weights for linear combination
+          w = numpyro.sample("w", args['priors']['w'])
+          b_0 = numpyro.deterministic("b_0", args['spatial_cov'] @ w)
+          
+          f_xy_events = f_xy_events + b_0[args['cov_ind']]
+          spatial_integral = jnp.exp(b_0[args['int_df']['cov_ind'].values] + 
+                                     f_xy[args['int_df']['comp_grid_id'].values]) @ args['int_df']['area'].values
+      else:
+          rate_xy = numpyro.deterministic("rate_xy",jnp.exp(f_xy))
+          spatial_integral = jnp.mean(rate_xy[args['spatial_grid_cells']])
+      Itot_xy=numpyro.deterministic("Itot_xy", spatial_integral)
       
       #Calculate total background integral
       Itot_txy_back=numpyro.deterministic("Itot_txy_back",Itot_t*Itot_xy)
@@ -104,11 +101,7 @@ def spatiotemporal_hawkes_model(args):
     if args['model'] == 'hawkes':
       ell_1=numpyro.deterministic('ell_1',jnp.sum(jnp.log(l_hawkes+mu_xyt_events)))
     elif args['model']=='cox_hawkes':
-      if 'spatial_cov':
-        b = b_0[args["indices_xy"]]
-      else:
-        b = b_0
-      ell_1=numpyro.deterministic('ell_1',jnp.sum(jnp.log(l_hawkes+jnp.exp(a_0 + b + f_t_events+f_xy_events))))
+      ell_1=numpyro.deterministic('ell_1',jnp.sum(jnp.log(l_hawkes+jnp.exp(a_0 + f_t_events+f_xy_events))))
 
     #### hawkes integral
     exponpart = alpha*(1-jnp.exp(-beta*(T-t_events)))
@@ -150,24 +143,28 @@ def spatiotemporal_LGCP_model(args):
     rate_t = numpyro.deterministic("rate_t",jnp.exp(f_t+a_0))
     Itot_t=numpyro.deterministic("Itot_t", jnp.sum(rate_t)/args["n_t"]*args["T"])
     f_t_i=f_t[args["indices_t"]]
-
-    # spatial rate
-    if 'spatial_cov' in args:
-      # weights for linear combination
-      w = numpyro.sample("w", args['priors']['w'])
-      b_0 = numpyro.deterministic("b_0", args['spatial_cov'] @ w)
-      #b_0 should be 25^2 vector
-    else:
-      b_0 = 0
     
     # zero mean spatial gp
     z_spatial = numpyro.sample("z_spatial", dist.Normal(jnp.zeros(args["z_dim_spatial"]), jnp.ones(args["z_dim_spatial"])))
     decoder_nn = vae_decoder_spatial(args["hidden_dim2_spatial"], args["hidden_dim1_spatial"], args["n_xy"])  
     decoder_params = args["decoder_params_spatial"]
     f_xy = numpyro.deterministic("f_xy", decoder_nn[1](decoder_params, z_spatial))
-    rate_xy = numpyro.deterministic("rate_xy",jnp.exp(f_xy+b_0))
-    Itot_xy=numpyro.deterministic("Itot_xy", jnp.sum(rate_xy)/args["n_xy"]**2)
-    f_xy_i= jnp.log(rate_xy[args["indices_xy"]])
+    rate_xy = numpyro.deterministic("rate_xy",jnp.exp(f_xy))
+    f_xy_i=f_xy[args["indices_xy"]]
+    
+    if 'spatial_cov' in args:
+        # weights for linear combination
+        w = numpyro.sample("w", args['priors']['w'])
+        b_0 = numpyro.deterministic("b_0", args['spatial_cov'] @ w)
+        f_xy_i += b_0[args['cov_ind']]
+        spatial_integral = jnp.exp(b_0[args['int_df']['cov_ind'].values] +
+                                   f_xy[args['int_df']['comp_grid_id'].values]
+                                  ) @ args['int_df']['area'].values
+    else:
+        spatial_integral = jnp.mean(rate_xy[args['spatial_grid_cells']])
+    
+    Itot_xy=numpyro.deterministic("Itot_xy", spatial_integral)
+    
 
     loglik=jnp.sum(f_t_i+f_xy_i+a_0)
     I_tot_txy=numpyro.deterministic("I_tot_txy",Itot_xy*Itot_t)

@@ -2,8 +2,9 @@
 import os
 import numpy as np
 import pandas as pd
+import geopandas as gpd
+from shapely.geometry import Polygon
 import matplotlib.pyplot as plt
-from scipy.interpolate import CloughTocher2DInterpolator
 from math import erf, ceil
 import warnings 
 import dill
@@ -21,7 +22,7 @@ import pkgutil
 
 
 class Point_Process_Model:
-    def __init__(self,data,A,model='cox_hawkes',spatial_cov=None,interpolation=False,**priors):
+    def __init__(self,data,A,model='cox_hawkes',spatial_cov=None,cov_names=None,cov_grid_size=None,**priors):
         """
         Spatiotemporal Point Process Model.
 
@@ -33,10 +34,13 @@ class Point_Process_Model:
             Spatial region of interest. First row is the x-range, second row is y-range.
         model: str
             one of ['cox_hawkes','lgcp','hawkes'].
-        spatial_cov: str,pd.DataFrame
-            Either file path or DataFrame containing spatial covariates. The first 2 columns must be 'X', 'Y'. If interpolation is false there must be exactly 625 rows corresponding to the spatial grid cells.
-        interpolation: bool
-            Interpolate covariates to center of covariate grid cells. All centers of computational grid cells must be within the convex hull of spatial_cov
+        spatial_cov: str,pd.DataFrame,gpd.GeoDataFrame
+            Either file path (.csv or .shp), DataFrame, or GeoDataFrame containing spatial covariates. Spatial covariates must cover all the points in data.
+            If spatial_cov is a csv or pd.DataFrame, the first 2 columns must be 'X', 'Y' and cov_grid_size must be specified.
+        cov_names: list
+            List of covariate names. Must all be columns in spatial_cov.
+        cov_grid_size: list-like
+            Spatial covariate grid (width, height).
         priors: dict
             priors for parameters (a_0,w,alpha,beta,sigmax_2). Must be a numpyro distribution.
         """
@@ -74,22 +78,32 @@ class Point_Process_Model:
         n_t=50
         T=50
         x_t = jnp.arange(0, T, T/n_t)
-        args[ "n_t"]=n_t
+        args["n_t"]=n_t
         args["x_t"]=x_t
         
         n_xy = 25
-        grid = jnp.arange(0, 1, 1/n_xy)
-        u, v = jnp.meshgrid(grid, grid)
-        x_xy = jnp.array([u.flatten(), v.flatten()]).transpose((1, 0))
-        args['x_xy']=x_xy
+        cols = np.arange(0, 1, 1/n_xy)
+        polygons = []
+        for y in cols:
+            for x in cols:
+                polygons.append(Polygon([(x,y), (x+1/n_xy, y), (x+1/n_xy, y+1/n_xy), (x, y+1/n_xy)]))
+        comp_grid = gpd.GeoDataFrame({'geometry':polygons,'comp_grid_id':np.arange(n_xy**2)})
+        comp_grid.geometry = comp_grid.geometry.scale(xfact=A[0,1]-A[0,0],yfact=A[1,1]-A[1,0],
+                                                      origin=(0,0)).translate(A[0,0],A[1,0])
+        geometry = gpd.points_from_xy(df.X, df.Y)
+        self.points = gpd.GeoDataFrame(data=df,geometry=geometry)
+        args['indices_xy'] = self.points.sjoin(comp_grid)['comp_grid_id'].values
+        
+        #grid = jnp.arange(0, 1, 1/n_xy)
+        #u, v = jnp.meshgrid(grid, grid)
+        #x_xy = jnp.array([u.flatten(), v.flatten()]).transpose((1, 0))
+        #args['x_xy']=x_xy
         args["n_xy"]= n_xy
         
         args["gp_kernel"]=exp_sq_kernel
         
-        indices_t=find_index(t_events_total, x_t)
-        indices_xy=find_index(xy_events_total, x_xy)
-        args['indices_t']=indices_t
-        args['indices_xy']=indices_xy
+        args['indices_t']=np.searchsorted(x_t, t_events_total, side='right')-1
+        
         
         # temporal VAE training arguments
         args["hidden_dim_temporal"]= 35
@@ -110,37 +124,54 @@ class Point_Process_Model:
         
         args["t_events"]=t_events_total
         args["xy_events"]=xy_events_total.transpose()
-
+        args['spatial_grid_cells'] = np.arange(25**2)
+        
         if spatial_cov is not None:
+            #convert input into geopandas dataframe.
             if type(spatial_cov)==str:
-                spatial_cov = pd.read_csv(spatial_cov)
-            args['num_cov'] = len(spatial_cov.columns)-2
-            self.cov_names = list(spatial_cov.columns[2:])
+                if spatial_cov[-4:] == '.shp':
+                    spatial_cov = gpd.read_file(spatial_cov)
+                else:
+                    spatial_cov = pd.read_csv(spatial_cov)
+            if type(spatial_cov) == pd.DataFrame:
+                polygons = []
+                for i in spatial_cov.index:
+                    polygons.append(Polygon([(spatial_cov.loc[i,'X']-cov_grid_size[0]/2,
+                                              spatial_cov.loc[i,'Y']-cov_grid_size[1]/2), 
+                                             (spatial_cov.loc[i,'X']+cov_grid_size[0]/2,
+                                              spatial_cov.loc[i,'Y']-cov_grid_size[1]/2), 
+                                             (spatial_cov.loc[i,'X']+cov_grid_size[0]/2,
+                                              spatial_cov.loc[i,'Y']+cov_grid_size[1]/2), 
+                                             (spatial_cov.loc[i,'X']-cov_grid_size[0]/2,
+                                              spatial_cov.loc[i,'Y']+cov_grid_size[1]/2)]))
+                spatial_cov = gpd.GeoDataFrame(data=spatial_cov,geometry=polygons)
+            spatial_cov['cov_ind'] = np.arange(len(spatial_cov))
+            #find covariate cell index for each point
+            self.points.crs = spatial_cov.crs
+            args['cov_ind'] = self.points.sjoin(spatial_cov)['cov_ind'].values
             
-            if interpolation:
-                #scale locations to computation grid
-                spatial_locs = (spatial_cov[['X','Y']].values - A[:,0])/(A[:,1]-A[:,0])
-                interp = CloughTocher2DInterpolator(spatial_locs,spatial_cov[self.cov_names].values)
-                #interpolate to center of grid cell.
-                #allow a slight bit of tolerance at the edges
-                g = np.asarray(x_xy)+0.5/n_xy
-                too_big = g>=1.0-0.5/n_xy
-                too_small = g<=0.5/n_xy
-                g[too_big] -= 1e-7
-                g[too_small] += 1e-7
-                X_s = interp(g)
-                if np.isnan(X_s).any():
-                    raise Exception("The convex hull of spatial covariates must encompass every computational grid cell center.")
-            else:
-                X_s = spatial_cov[self.cov_names].values
+            args['num_cov'] = len(cov_names)
+            self.cov_names = cov_names
+            self.spatial_cov = spatial_cov
+            
+            X_s = spatial_cov[self.cov_names].values
             # standardize covariates
             args['spatial_cov'] = (X_s-X_s.mean(axis=0))/(X_s.var(axis=0)**0.5)
             
-        if False:
-            args['spatial_grid_cells'] = np.setdiff1d(np.arange(25**2),
-                                                      array([0,1,2,3,4,10,25,26,27,28,50,51,52,53,75,76,77]))
-        else:
-            args['spatial_grid_cells'] = np.arange(25**2)
+            #Create Computational Grid GeoDataFrame
+            if args['model'] in ['lgcp','cox_hawkes']:
+                comp_grid.crs = spatial_cov.crs
+                self.comp_grid = comp_grid
+                            
+                #find covariate cell intersection with computational grid cells area
+                intersect = gpd.overlay(comp_grid, spatial_cov, how='intersection')
+                intersect['area'] = intersect.area/((A[0,1]-A[0,0])*(A[1,1]-A[1,0]))
+                intersect = intersect[intersect['area']>1e-10]
+                args['int_df'] = intersect
+                #find cells on the computational grid that are in the domain
+                args['spatial_grid_cells'] = np.unique(comp_grid.sjoin(spatial_cov, how='inner')['comp_grid_id'])
+            else:
+                args['cov_area'] = (spatial_cov.area/((A[0,1]-A[0,0])*(A[1,1]-A[1,0]))).values
 
         default_priors = {"a_0": dist.Normal(0,3),
                           "alpha": dist.HalfNormal(0.5),
@@ -149,7 +180,7 @@ class Point_Process_Model:
                          }
         if 'num_cov' in args:
             default_priors["w"] = dist.Normal(jnp.zeros(args['num_cov']),jnp.ones(args["num_cov"]))
-            
+        
         for par, prior in priors.items():
             if par in default_priors:
                 default_priors[par] = prior
@@ -368,35 +399,35 @@ class Point_Process_Model:
         if include_cov and 'spatial_cov' not in self.args:
             raise Exception("No spatial covariates are in the model and include_cov was set to True")
         
-        if self.args['model'] in ['cox_hawkes','lgcp']:
-            f_xy_post=self.mcmc_samples["f_xy"]
-        else:
-            f_xy_post = 0
-        
-        if include_cov:
-            f_xy_post = f_xy_post + self.mcmc_samples['b_0']
-        
         if self.args['model'] in ['cox_hawkes','lgcp'] and include_cov:
-            fig_desc = "$f_s$ + X(s)w"
+            self._plot_cov_comp_grid()
         elif include_cov:
-            fig_desc = "X(s)w"
+            self._plot_cov()
         else:
-            fig_desc = "$f_s$"
-
-        f_xy_post_mean=jnp.mean(f_xy_post, axis=0)
+            self._plot_grid()
         
+        if output_file is not None:
+            plt.savefig(output_file)
+        plt.show()
+
+    def _plot_grid(self):
+        """
+        Plot spatial for computational grid only
+        """
+        f_xy_post = self.mcmc_samples["f_xy"]
+        f_xy_post_mean=jnp.mean(f_xy_post, axis=0)
         fig, ax = plt.subplots(1,2, figsize=(10, 5))
         _min, _max = np.amin(f_xy_post), np.amax(f_xy_post)
         im = ax[0].imshow(f_xy_post_mean.reshape(self.args["n_xy"], self.args["n_xy"]), 
                           cmap='viridis', interpolation='none', extent=[0,1,0,1], 
                           origin='lower',vmin=_min, vmax=_max)
-        ax[0].title.set_text('Mean Posterior '+fig_desc)
+        ax[0].title.set_text('Mean Posterior $f_s$')
         im2 = ax[1].imshow(f_xy_post_mean.reshape(self.args["n_xy"], self.args["n_xy"]), 
                            cmap='viridis', interpolation='none', extent=[0,1,0,1], 
                            origin='lower',vmin=_min, vmax=_max)
         ax[1].plot(self.args["xy_events"][0],self.args["xy_events"][1],'x', 
                    alpha=.15,color='red',label='true event locations')
-        ax[1].title.set_text(f'Mean Posterior {fig_desc} With Events')
+        ax[1].title.set_text('Mean Posterior $f_s$ With Events')
         for i in range(2):
             ax[i].set_xlabel('x')
             ax[i].set_ylabel('y')
@@ -406,6 +437,31 @@ class Point_Process_Model:
         fig.subplots_adjust(right=0.8)
         cax = fig.add_axes([ax[1].get_position().x1+0.03,ax[1].get_position().y0,0.02,ax[1].get_position().height])
         fig.colorbar(im, cax=cax)
-        if output_file is not None:
-            plt.savefig(output_file)
-        plt.show()
+        return fig
+    
+    def _plot_cov_comp_grid(self):
+        """
+        Plot spatial for computational grid and spatial covariates.
+        """
+        post_samples = (self.mcmc_samples['b_0'][:,self.args['int_df']['cov_ind'].values] + 
+                        self.mcmc_samples["f_xy"][:,self.args['int_df']['comp_grid_id'].values])
+        self.args['int_df']['post_mean'] = post_samples.mean(axis=0)
+        fig, ax = plt.subplots(1,2, figsize=(10, 5))
+        self.args['int_df'].plot(column='post_mean',ax=ax[0])
+        ax[0].set_title('Mean Posterior $f_s + X(s)w$')
+        self.args['int_df'].plot(column='post_mean',ax=ax[1])
+        self.points.plot(ax=ax[1],alpha=.15,color='red',marker='x')
+        ax[1].set_title('Mean Posterior $f_s + X(s)w$ With Events')
+        
+    def _plot_cov(self):
+        """
+        Plot spatial for covariates only.
+        """
+        self.spatial_cov['post_mean'] = self.mcmc_samples['b_0'].mean(axis=0)
+        fig, ax = plt.subplots(1,2, figsize=(10, 5))
+        self.spatial_cov.plot(column='post_mean',ax=ax[0])
+        ax[0].set_title('Mean Posterior $X(s)w$')
+        self.spatial_cov.plot(column='post_mean',ax=ax[1])
+        ax[1].set_title('Mean Posterior $X(s)w$ With Events')
+        self.points.plot(ax=ax[1],alpha=.15,color='red',marker='x')
+        ax[1].set_title('Mean Posterior $f_s + X(s)w$ With Events')
