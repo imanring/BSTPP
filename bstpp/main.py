@@ -170,6 +170,8 @@ class Point_Process_Model:
                 args['int_df'] = intersect
                 #find cells on the computational grid that are in the domain
                 args['spatial_grid_cells'] = np.unique(comp_grid.sjoin(spatial_cov, how='inner')['comp_grid_id'])
+            else:
+                args['cov_area'] = (spatial_cov.area/((A[0,1]-A[0,0])*(A[1,1]-A[1,0]))).values
 
         default_priors = {"a_0": dist.Normal(0,3),
                           "alpha": dist.HalfNormal(0.5),
@@ -409,6 +411,9 @@ class Point_Process_Model:
         plt.show()
 
     def _plot_grid(self):
+        """
+        Plot spatial for computational grid only
+        """
         f_xy_post = self.mcmc_samples["f_xy"]
         f_xy_post_mean=jnp.mean(f_xy_post, axis=0)
         fig, ax = plt.subplots(1,2, figsize=(10, 5))
@@ -435,6 +440,9 @@ class Point_Process_Model:
         return fig
     
     def _plot_cov_comp_grid(self):
+        """
+        Plot spatial for computational grid and spatial covariates.
+        """
         post_samples = (self.mcmc_samples['b_0'][:,self.args['int_df']['cov_ind'].values] + 
                         self.mcmc_samples["f_xy"][:,self.args['int_df']['comp_grid_id'].values])
         self.args['int_df']['post_mean'] = post_samples.mean(axis=0)
@@ -446,7 +454,14 @@ class Point_Process_Model:
         ax[1].set_title('Mean Posterior $f_s + X(s)w$ With Events')
         
     def _plot_cov(self):
+        """
+        Plot spatial for covariates only.
+        """
         self.spatial_cov['post_mean'] = self.mcmc_samples['b_0'].mean(axis=0)
-        self.spatial_cov.plot(column='post_mean')
-        ax = plt.gca()
-        ax.set_title('Mean Posterior $X(s)w$')
+        fig, ax = plt.subplots(1,2, figsize=(10, 5))
+        self.spatial_cov.plot(column='post_mean',ax=ax[0])
+        ax[0].set_title('Mean Posterior $X(s)w$')
+        self.spatial_cov.plot(column='post_mean',ax=ax[1])
+        ax[1].set_title('Mean Posterior $X(s)w$ With Events')
+        self.points.plot(ax=ax[1],alpha=.15,color='red',marker='x')
+        ax[1].set_title('Mean Posterior $f_s + X(s)w$ With Events')
