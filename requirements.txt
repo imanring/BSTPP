@@ -5,6 +5,7 @@ dill==0.3.5.1
 etils
 flatbuffers
 fonttools==4.34.4
+geopandas==0.14.0
 h5py==3.7.0
 importlib-resources
 jax==0.3.25 
