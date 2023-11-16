@@ -1,6 +1,7 @@
 __pycache__/
 data/
+output/
 **/*.pkl
 **/.ipynb_checkpoints/
-test/
 html/
+VAE_Training.ipynb

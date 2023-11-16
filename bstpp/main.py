@@ -64,11 +64,19 @@ class Point_Process_Model:
         t_events_total/=t_events_total.max()
         t_events_total*=50
 
-        x_range = A[0]
+        if type(A) is gpd.GeoDataFrame:
+            A_ = np.stack((A.bounds.min(axis=0)[['minx','miny']],
+                      A.bounds.max(axis=0)[['maxx','maxy']])).T
+            args['A_area'] = A.area.sum()/((A_[0,1]-A_[0,0])*(A_[1,1]-A_[1,0]))
+        else:
+            args['A_area'] = 1
+            A_ = A
+            
+        x_range = A_[0]
         x_events_total=(df['X']-x_range[0]).to_numpy()
         x_events_total/=(x_range[1]-x_range[0])
 
-        y_range = A[1]
+        y_range = A_[1]
         y_events_total=(df['Y']-y_range[0]).to_numpy()
         y_events_total/=(y_range[1]-y_range[0])
         
@@ -88,16 +96,19 @@ class Point_Process_Model:
             for x in cols:
                 polygons.append(Polygon([(x,y), (x+1/n_xy, y), (x+1/n_xy, y+1/n_xy), (x, y+1/n_xy)]))
         comp_grid = gpd.GeoDataFrame({'geometry':polygons,'comp_grid_id':np.arange(n_xy**2)})
-        comp_grid.geometry = comp_grid.geometry.scale(xfact=A[0,1]-A[0,0],yfact=A[1,1]-A[1,0],
-                                                      origin=(0,0)).translate(A[0,0],A[1,0])
+        comp_grid.geometry = comp_grid.geometry.scale(xfact=A_[0,1]-A_[0,0],yfact=A_[1,1]-A_[1,0],
+                                                      origin=(0,0)).translate(A_[0,0],A_[1,0])
+        self.comp_grid = comp_grid
+        if type(A) is gpd.GeoDataFrame:
+            args['spatial_grid_cells'] = np.unique(comp_grid.sjoin(A, how='inner')['comp_grid_id'])
+            self.A = A
+        else:
+            self.A = comp_grid
         geometry = gpd.points_from_xy(df.X, df.Y)
         self.points = gpd.GeoDataFrame(data=df,geometry=geometry)
         args['indices_xy'] = self.points.sjoin(comp_grid)['comp_grid_id'].values
-        
-        #grid = jnp.arange(0, 1, 1/n_xy)
-        #u, v = jnp.meshgrid(grid, grid)
-        #x_xy = jnp.array([u.flatten(), v.flatten()]).transpose((1, 0))
-        #args['x_xy']=x_xy
+        if len(args['indices_xy']) != len(self.points):
+            raise Exception("Computational grid does not encompass all data points!")
         args["n_xy"]= n_xy
         
         args["gp_kernel"]=exp_sq_kernel
@@ -112,14 +123,15 @@ class Point_Process_Model:
         # spatial VAE training arguments
         args["hidden_dim1_spatial"]= 35
         args["hidden_dim2_spatial"]= 30
-        args["z_dim_spatial"]=10
+        args["z_dim_spatial"]=15
         
         if args['model'] in ['lgcp','cox_hawkes']:
             decoder_params = pickle.loads(pkgutil.get_data(__name__, "decoders/decoder_1d_T50_fixed_ls"))
             args["decoder_params_temporal"] = decoder_params
             
             #Load 2d spatial trained decoder
-            decoder_params = pickle.loads(pkgutil.get_data(__name__, "decoders/decoder_2d_n25_infer_hyperpars"))
+            #decoder_params = pickle.loads(pkgutil.get_data(__name__, "decoders/decoder_2d_n25_infer_hyperpars"))
+            decoder_params = pickle.loads(pkgutil.get_data(__name__, "decoders/2d_decoder_12.pkl"))
             args["decoder_params_spatial"] = decoder_params
         
         args["t_events"]=t_events_total
@@ -149,6 +161,8 @@ class Point_Process_Model:
             #find covariate cell index for each point
             self.points.crs = spatial_cov.crs
             args['cov_ind'] = self.points.sjoin(spatial_cov)['cov_ind'].values
+            if len(args['cov_ind']) != len(self.points):
+                raise Exception("Spatial covariates are not defined for all data points!")
             
             args['num_cov'] = len(cov_names)
             self.cov_names = cov_names
@@ -161,17 +175,16 @@ class Point_Process_Model:
             #Create Computational Grid GeoDataFrame
             if args['model'] in ['lgcp','cox_hawkes']:
                 comp_grid.crs = spatial_cov.crs
-                self.comp_grid = comp_grid
                             
                 #find covariate cell intersection with computational grid cells area
                 intersect = gpd.overlay(comp_grid, spatial_cov, how='intersection')
-                intersect['area'] = intersect.area/((A[0,1]-A[0,0])*(A[1,1]-A[1,0]))
+                intersect['area'] = intersect.area/((A_[0,1]-A_[0,0])*(A_[1,1]-A_[1,0]))
                 intersect = intersect[intersect['area']>1e-10]
                 args['int_df'] = intersect
                 #find cells on the computational grid that are in the domain
                 args['spatial_grid_cells'] = np.unique(comp_grid.sjoin(spatial_cov, how='inner')['comp_grid_id'])
             else:
-                args['cov_area'] = (spatial_cov.area/((A[0,1]-A[0,0])*(A[1,1]-A[1,0]))).values
+                args['cov_area'] = (spatial_cov.area/((A_[0,1]-A_[0,0])*(A_[1,1]-A_[1,0]))).values
 
         default_priors = {"a_0": dist.Normal(0,3),
                           "alpha": dist.HalfNormal(0.5),
@@ -381,7 +394,7 @@ class Point_Process_Model:
             plt.savefig(output_file)
         plt.show()
         
-    def plot_spatial_background(self,output_file=None,include_cov=False):
+    def plot_spatial_background(self,output_file=None,include_cov=False,**kwargs):
         """
         Plot mean posterior spatial background with/without covariates
         
@@ -398,24 +411,37 @@ class Point_Process_Model:
             raise Exception("Nothing to plot: spatial background is constant")
         if include_cov and 'spatial_cov' not in self.args:
             raise Exception("No spatial covariates are in the model and include_cov was set to True")
+
+        if 'alpha' not in kwargs:
+            kwargs['alpha'] = .1
         
         if self.args['model'] in ['cox_hawkes','lgcp'] and include_cov:
-            self._plot_cov_comp_grid()
+            self._plot_cov_comp_grid(**kwargs)
         elif include_cov:
-            self._plot_cov()
+            self._plot_cov(**kwargs)
         else:
-            self._plot_grid()
+            self._plot_grid(**kwargs)
         
         if output_file is not None:
             plt.savefig(output_file)
         plt.show()
 
-    def _plot_grid(self):
+    def _plot_grid(self,**kwargs):
         """
         Plot spatial for computational grid only
         """
+        
         f_xy_post = self.mcmc_samples["f_xy"]
         f_xy_post_mean=jnp.mean(f_xy_post, axis=0)
+        self.comp_grid['f_xy_post_mean'] = f_xy_post_mean
+        intersect = gpd.overlay(self.comp_grid, self.A, how='intersection')
+        fig, ax = plt.subplots(1,2, figsize=(10, 5))
+        intersect.plot(column='f_xy_post_mean',ax=ax[0])
+        ax[0].set_title('Mean Posterior $f_s$')
+        intersect.plot(column='f_xy_post_mean',ax=ax[1])
+        self.points.plot(ax=ax[1],color='red',marker='x',**kwargs)
+        ax[1].set_title('Mean Posterior $f_s$ With Events')
+        """
         fig, ax = plt.subplots(1,2, figsize=(10, 5))
         _min, _max = np.amin(f_xy_post), np.amax(f_xy_post)
         im = ax[0].imshow(f_xy_post_mean.reshape(self.args["n_xy"], self.args["n_xy"]), 
@@ -437,9 +463,10 @@ class Point_Process_Model:
         fig.subplots_adjust(right=0.8)
         cax = fig.add_axes([ax[1].get_position().x1+0.03,ax[1].get_position().y0,0.02,ax[1].get_position().height])
         fig.colorbar(im, cax=cax)
+        """
         return fig
     
-    def _plot_cov_comp_grid(self):
+    def _plot_cov_comp_grid(self,**kwargs):
         """
         Plot spatial for computational grid and spatial covariates.
         """
@@ -450,10 +477,10 @@ class Point_Process_Model:
         self.args['int_df'].plot(column='post_mean',ax=ax[0])
         ax[0].set_title('Mean Posterior $f_s + X(s)w$')
         self.args['int_df'].plot(column='post_mean',ax=ax[1])
-        self.points.plot(ax=ax[1],alpha=.15,color='red',marker='x')
+        self.points.plot(ax=ax[1],color='red',marker='x',**kwargs)
         ax[1].set_title('Mean Posterior $f_s + X(s)w$ With Events')
         
-    def _plot_cov(self):
+    def _plot_cov(self,**kwargs):
         """
         Plot spatial for covariates only.
         """
@@ -463,5 +490,5 @@ class Point_Process_Model:
         ax[0].set_title('Mean Posterior $X(s)w$')
         self.spatial_cov.plot(column='post_mean',ax=ax[1])
         ax[1].set_title('Mean Posterior $X(s)w$ With Events')
-        self.points.plot(ax=ax[1],alpha=.15,color='red',marker='x')
+        self.points.plot(ax=ax[1],color='red',marker='x',**kwargs)
         ax[1].set_title('Mean Posterior $f_s + X(s)w$ With Events')

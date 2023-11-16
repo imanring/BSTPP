@@ -29,7 +29,7 @@ def spatiotemporal_hawkes_model(args):
         Itot_txy_back = numpyro.deterministic("Itot_txy_back",mu_xyt@args['cov_area']*args['T'])
         mu_xyt_events = mu_xyt[args["cov_ind"]]
       else:
-        Itot_txy_back = numpyro.deterministic("Itot_txy_back",mu_xyt*args['T'])
+        Itot_txy_back = numpyro.deterministic("Itot_txy_back",mu_xyt*args['T']*args['A_area'])
         mu_xyt_events = mu_xyt
 
     ####### LGCP BACKGROUND
