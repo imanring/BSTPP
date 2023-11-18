@@ -58,7 +58,8 @@ def spatiotemporal_hawkes_model(args):
       decoder_nn = vae_decoder_spatial(args["hidden_dim2_spatial"], args["hidden_dim1_spatial"], args["n_xy"])  
       decoder_params = args["decoder_params_spatial"]
       # Generate Gaussian Process from VAE
-      f_xy = numpyro.deterministic("f_xy", decoder_nn[1](decoder_params, z_spatial))
+      scale = numpyro.sample("scale", dist.Gamma(.25,.25))
+      f_xy = numpyro.deterministic("f_xy", scale*decoder_nn[1](decoder_params, z_spatial))
       f_xy_events=f_xy[args["indices_xy"]]
       
       # Calculate spatial intensity
@@ -148,7 +149,8 @@ def spatiotemporal_LGCP_model(args):
     z_spatial = numpyro.sample("z_spatial", dist.Normal(jnp.zeros(args["z_dim_spatial"]), jnp.ones(args["z_dim_spatial"])))
     decoder_nn = vae_decoder_spatial(args["hidden_dim2_spatial"], args["hidden_dim1_spatial"], args["n_xy"])  
     decoder_params = args["decoder_params_spatial"]
-    f_xy = numpyro.deterministic("f_xy", decoder_nn[1](decoder_params, z_spatial))
+    scale = numpyro.sample("scale", dist.Gamma(.25,.25))
+    f_xy = numpyro.deterministic("f_xy", scale*decoder_nn[1](decoder_params, z_spatial))
     rate_xy = numpyro.deterministic("rate_xy",jnp.exp(f_xy))
     f_xy_i=f_xy[args["indices_xy"]]
     

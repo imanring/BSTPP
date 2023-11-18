@@ -45,10 +45,8 @@ class Point_Process_Model:
             priors for parameters (a_0,w,alpha,beta,sigmax_2). Must be a numpyro distribution.
         """
         if type(data)==str:
-            df = pd.read_csv(data)
-        elif type(data)==pd.DataFrame:
-            df = data
-        self.df = df
+            data = pd.read_csv(data)
+        self.data = data
         
         args={}
         args['T']=50
@@ -59,30 +57,34 @@ class Point_Process_Model:
         args['y_min']=0
         args['y_max']=1
         args['model']=model
-        
-        t_events_total=((df['T']-df['T'].min())).to_numpy()
+
+        #scale temporal events
+        t_events_total=((data['T']-data['T'].min())).to_numpy()
         t_events_total/=t_events_total.max()
         t_events_total*=50
 
         if type(A) is gpd.GeoDataFrame:
             A_ = np.stack((A.bounds.min(axis=0)[['minx','miny']],
                       A.bounds.max(axis=0)[['maxx','maxy']])).T
+            #proportion of area of rectangle A_ covered by A. Used for Hawkes integral.
             args['A_area'] = A.area.sum()/((A_[0,1]-A_[0,0])*(A_[1,1]-A_[1,0]))
-        else:
+        else:# A is rectangle specified by np.array
             args['A_area'] = 1
             A_ = A
-            
+        
+        #scale spatial events
         x_range = A_[0]
-        x_events_total=(df['X']-x_range[0]).to_numpy()
+        x_events_total=(data['X']-x_range[0]).to_numpy()
         x_events_total/=(x_range[1]-x_range[0])
-
         y_range = A_[1]
-        y_events_total=(df['Y']-y_range[0]).to_numpy()
+        y_events_total=(data['Y']-y_range[0]).to_numpy()
         y_events_total/=(y_range[1]-y_range[0])
         
         xy_events_total=np.array((x_events_total,y_events_total)).transpose()
+        args["t_events"]=t_events_total
+        args["xy_events"]=xy_events_total.transpose()
         
-        
+        #create computational grid
         n_t=50
         T=50
         x_t = jnp.arange(0, T, T/n_t)
@@ -98,14 +100,21 @@ class Point_Process_Model:
         comp_grid = gpd.GeoDataFrame({'geometry':polygons,'comp_grid_id':np.arange(n_xy**2)})
         comp_grid.geometry = comp_grid.geometry.scale(xfact=A_[0,1]-A_[0,0],yfact=A_[1,1]-A_[1,0],
                                                       origin=(0,0)).translate(A_[0,0],A_[1,0])
-        self.comp_grid = comp_grid
+        
         if type(A) is gpd.GeoDataFrame:
+            # find grid cells overlapping with A
             args['spatial_grid_cells'] = np.unique(comp_grid.sjoin(A, how='inner')['comp_grid_id'])
             self.A = A
+            comp_grid.set_crs(crs=A.crs)
         else:
             self.A = comp_grid
-        geometry = gpd.points_from_xy(df.X, df.Y)
-        self.points = gpd.GeoDataFrame(data=df,geometry=geometry)
+            args['spatial_grid_cells'] = np.arange(25**2)
+        
+        self.comp_grid = comp_grid
+        geometry = gpd.points_from_xy(data.X, data.Y,crs=comp_grid.crs)
+        self.points = gpd.GeoDataFrame(data=data,geometry=geometry)
+        
+        #find grid cells where points are located
         args['indices_xy'] = self.points.sjoin(comp_grid)['comp_grid_id'].values
         if len(args['indices_xy']) != len(self.points):
             raise Exception("Computational grid does not encompass all data points!")
@@ -131,12 +140,8 @@ class Point_Process_Model:
             
             #Load 2d spatial trained decoder
             #decoder_params = pickle.loads(pkgutil.get_data(__name__, "decoders/decoder_2d_n25_infer_hyperpars"))
-            decoder_params = pickle.loads(pkgutil.get_data(__name__, "decoders/2d_decoder_12.pkl"))
+            decoder_params = pickle.loads(pkgutil.get_data(__name__, "decoders/2d_decoder_10_5.pkl"))
             args["decoder_params_spatial"] = decoder_params
-        
-        args["t_events"]=t_events_total
-        args["xy_events"]=xy_events_total.transpose()
-        args['spatial_grid_cells'] = np.arange(25**2)
         
         if spatial_cov is not None:
             #convert input into geopandas dataframe.
@@ -157,6 +162,7 @@ class Point_Process_Model:
                                              (spatial_cov.loc[i,'X']-cov_grid_size[0]/2,
                                               spatial_cov.loc[i,'Y']+cov_grid_size[1]/2)]))
                 spatial_cov = gpd.GeoDataFrame(data=spatial_cov,geometry=polygons)
+                spatial_cov.crs = self.A.crs
             spatial_cov['cov_ind'] = np.arange(len(spatial_cov))
             #find covariate cell index for each point
             self.points.crs = spatial_cov.crs
@@ -175,7 +181,6 @@ class Point_Process_Model:
             #Create Computational Grid GeoDataFrame
             if args['model'] in ['lgcp','cox_hawkes']:
                 comp_grid.crs = spatial_cov.crs
-                            
                 #find covariate cell intersection with computational grid cells area
                 intersect = gpd.overlay(comp_grid, spatial_cov, how='intersection')
                 intersect['area'] = intersect.area/((A_[0,1]-A_[0,0])*(A_[1,1]-A_[1,0]))
@@ -186,8 +191,9 @@ class Point_Process_Model:
             else:
                 args['cov_area'] = (spatial_cov.area/((A_[0,1]-A_[0,0])*(A_[1,1]-A_[1,0]))).values
 
+        #Set up parameter priors
         default_priors = {"a_0": dist.Normal(0,3),
-                          "alpha": dist.HalfNormal(0.5),
+                          "alpha": dist.Beta(1,1),
                           "beta": dist.HalfNormal(0.3),
                           "sigmax_2": dist.HalfNormal(1),
                          }
@@ -228,10 +234,8 @@ class Point_Process_Model:
         
         output_dict = {}
         if self.args['model'] in ['cox_hawkes','hawkes']:
-            output_dict['model']=spatiotemporal_hawkes_model
             self.mcmc = run_mcmc(rng_key_post, spatiotemporal_hawkes_model, self.args)
         elif self.args['model'] == 'lgcp':
-            output_dict['model']=spatiotemporal_LGCP_model
             self.mcmc = run_mcmc(rng_key_post, spatiotemporal_LGCP_model, self.args)
         self.mcmc_samples=self.mcmc.get_samples()
         
@@ -298,9 +302,9 @@ class Point_Process_Model:
         if self.args['model'] not in ['hawkes','cox_hawkes']:
             raise Exception("This is not a Hawkes Model. Cannot plot trigger parameters.")
         
-        scale = 50/self.df['T'].max()
+        scale = 50/self.data['T'].max()
         post_mean = float(self.mcmc_samples['beta'].mean())
-        x = np.arange(0,3.5/(scale*post_mean),post_mean*3.5/250)
+        x = np.arange(0,3.5/(scale*post_mean),3.5/(scale*post_mean)/250)
         fig, ax = plt.subplots(figsize=(7,7))
         for b in np.random.choice(self.mcmc_samples['beta'],100):
             plt.plot(x,b*np.exp(-b*scale*x),color='black',alpha=0.1)
@@ -434,36 +438,13 @@ class Point_Process_Model:
         f_xy_post = self.mcmc_samples["f_xy"]
         f_xy_post_mean=jnp.mean(f_xy_post, axis=0)
         self.comp_grid['f_xy_post_mean'] = f_xy_post_mean
-        intersect = gpd.overlay(self.comp_grid, self.A, how='intersection')
+        intersect = gpd.overlay(self.comp_grid, self.A[['geometry']], how='intersection')
         fig, ax = plt.subplots(1,2, figsize=(10, 5))
         intersect.plot(column='f_xy_post_mean',ax=ax[0])
         ax[0].set_title('Mean Posterior $f_s$')
         intersect.plot(column='f_xy_post_mean',ax=ax[1])
         self.points.plot(ax=ax[1],color='red',marker='x',**kwargs)
         ax[1].set_title('Mean Posterior $f_s$ With Events')
-        """
-        fig, ax = plt.subplots(1,2, figsize=(10, 5))
-        _min, _max = np.amin(f_xy_post), np.amax(f_xy_post)
-        im = ax[0].imshow(f_xy_post_mean.reshape(self.args["n_xy"], self.args["n_xy"]), 
-                          cmap='viridis', interpolation='none', extent=[0,1,0,1], 
-                          origin='lower',vmin=_min, vmax=_max)
-        ax[0].title.set_text('Mean Posterior $f_s$')
-        im2 = ax[1].imshow(f_xy_post_mean.reshape(self.args["n_xy"], self.args["n_xy"]), 
-                           cmap='viridis', interpolation='none', extent=[0,1,0,1], 
-                           origin='lower',vmin=_min, vmax=_max)
-        ax[1].plot(self.args["xy_events"][0],self.args["xy_events"][1],'x', 
-                   alpha=.15,color='red',label='true event locations')
-        ax[1].title.set_text('Mean Posterior $f_s$ With Events')
-        for i in range(2):
-            ax[i].set_xlabel('x')
-            ax[i].set_ylabel('y')
-            for item in ([ ax[i].xaxis.label, ax[i].yaxis.label, ax[i].title] ):
-                item.set_fontsize(15)
-        
-        fig.subplots_adjust(right=0.8)
-        cax = fig.add_axes([ax[1].get_position().x1+0.03,ax[1].get_position().y0,0.02,ax[1].get_position().height])
-        fig.colorbar(im, cax=cax)
-        """
         return fig
     
     def _plot_cov_comp_grid(self,**kwargs):
