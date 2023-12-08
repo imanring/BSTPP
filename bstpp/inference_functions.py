@@ -2,13 +2,16 @@ import os
 import time 
 import jax
 import jax.numpy as jnp
+from jax.example_libraries.optimizers import exponential_decay, inverse_time_decay
 
 # Numpyro
 import numpyro
 import numpyro.distributions as dist
+from numpyro.infer import MCMC, NUTS, init_to_median, init_to_value, init_to_uniform
+from numpyro.infer import Trace_ELBO, SVI, Predictive
+from numpyro.infer.autoguide import *
 from numpyro import optim
-from numpyro.infer import Trace_ELBO, MCMC, NUTS, init_to_median
-from .utils import difference_matrix, difference_matrix_partial
+from .utils import difference_matrix
 from .vae_functions import *
 
 
@@ -58,8 +61,7 @@ def spatiotemporal_hawkes_model(args):
       decoder_nn = vae_decoder_spatial(args["hidden_dim2_spatial"], args["hidden_dim1_spatial"], args["n_xy"])  
       decoder_params = args["decoder_params_spatial"]
       # Generate Gaussian Process from VAE
-      scale = numpyro.sample("scale", dist.Gamma(.25,.25))
-      f_xy = numpyro.deterministic("f_xy", scale*decoder_nn[1](decoder_params, z_spatial))
+      f_xy = numpyro.deterministic("f_xy", jnp.exp(args['sp_var_mu']) * decoder_nn[1](decoder_params, z_spatial))
       f_xy_events=f_xy[args["indices_xy"]]
       
       # Calculate spatial intensity
@@ -73,7 +75,7 @@ def spatiotemporal_hawkes_model(args):
                                      f_xy[args['int_df']['comp_grid_id'].values]) @ args['int_df']['area'].values
       else:
           rate_xy = numpyro.deterministic("rate_xy",jnp.exp(f_xy))
-          spatial_integral = jnp.mean(rate_xy[args['spatial_grid_cells']])
+          spatial_integral = jnp.sum(rate_xy[args['spatial_grid_cells']])/args['n_xy']**2
       Itot_xy=numpyro.deterministic("Itot_xy", spatial_integral)
       
       #Calculate total background integral
@@ -96,7 +98,7 @@ def spatiotemporal_hawkes_model(args):
     S_mat_x = difference_matrix(xy_events[0])
     S_mat_y = difference_matrix(xy_events[1])
     S_diff_sq=(S_mat_x**2)/sigmax_2+(S_mat_y**2)/sigmay_2; 
-    l_hawkes_sum=alpha*beta/(2*jnp.pi*jnp.sqrt(sigmax_2*sigmay_2))*jnp.exp(-beta*T_diff-0.5*S_diff_sq)
+    l_hawkes_sum=alpha/(beta*2*jnp.pi*jnp.sqrt(sigmax_2*sigmay_2))*jnp.exp(-T_diff/beta-0.5*S_diff_sq)
     l_hawkes = numpyro.deterministic('l_hawkes',jnp.sum(jnp.tril(l_hawkes_sum,-1),1))
 
     if args['model'] == 'hawkes':
@@ -105,15 +107,15 @@ def spatiotemporal_hawkes_model(args):
       ell_1=numpyro.deterministic('ell_1',jnp.sum(jnp.log(l_hawkes+jnp.exp(a_0 + f_t_events+f_xy_events))))
 
     #### hawkes integral
-    exponpart = alpha*(1-jnp.exp(-beta*(T-t_events)))
+    exponpart = alpha*(1-jnp.exp(-(T-t_events)/beta))
     numpyro.deterministic("exponpart",exponpart)
     
     s1max=(x_max-xy_events[0])/(jnp.sqrt(2*sigmax_2))
-    s1min=(xy_events[0])/(jnp.sqrt(2*sigmax_2))
+    s1min=(xy_events[0]-x_min)/(jnp.sqrt(2*sigmax_2))
     gaussianpart1=0.5*jax.scipy.special.erf(s1max)+0.5*jax.scipy.special.erf(s1min)
     
     s2max=(y_max-xy_events[1])/(jnp.sqrt(2*sigmay_2))
-    s2min=(xy_events[1])/(jnp.sqrt(2*sigmay_2))
+    s2min=(xy_events[1]-y_max)/(jnp.sqrt(2*sigmay_2))
     gaussianpart2=0.5*jax.scipy.special.erf(s2max)+0.5*jax.scipy.special.erf(s2min)
     gaussianpart=gaussianpart2*gaussianpart1
     numpyro.deterministic("gaussianpart",gaussianpart)    
@@ -149,8 +151,7 @@ def spatiotemporal_LGCP_model(args):
     z_spatial = numpyro.sample("z_spatial", dist.Normal(jnp.zeros(args["z_dim_spatial"]), jnp.ones(args["z_dim_spatial"])))
     decoder_nn = vae_decoder_spatial(args["hidden_dim2_spatial"], args["hidden_dim1_spatial"], args["n_xy"])  
     decoder_params = args["decoder_params_spatial"]
-    scale = numpyro.sample("scale", dist.Gamma(.25,.25))
-    f_xy = numpyro.deterministic("f_xy", scale*decoder_nn[1](decoder_params, z_spatial))
+    f_xy = numpyro.deterministic("f_xy", jnp.exp(args['sp_var_mu']) * decoder_nn[1](decoder_params, z_spatial))
     rate_xy = numpyro.deterministic("rate_xy",jnp.exp(f_xy))
     f_xy_i=f_xy[args["indices_xy"]]
     
@@ -163,7 +164,7 @@ def spatiotemporal_LGCP_model(args):
                                    f_xy[args['int_df']['comp_grid_id'].values]
                                   ) @ args['int_df']['area'].values
     else:
-        spatial_integral = jnp.mean(rate_xy[args['spatial_grid_cells']])
+        spatial_integral = jnp.sum(rate_xy[args['spatial_grid_cells']])/args['n_xy']**2
     
     Itot_xy=numpyro.deterministic("Itot_xy", spatial_integral)
     
@@ -181,7 +182,8 @@ def run_mcmc(rng_key, model_mcmc, args):
     start = time.time()
 
     init_strategy = init_to_median(num_samples=10)
-    kernel = NUTS(model_mcmc, init_strategy=init_strategy)
+    kernel = NUTS(model_mcmc, init_strategy=init_strategy)#, max_tree_depth=(7,9))
+    #kernel = SVI(model_mcmc, )
     mcmc = MCMC(
         kernel,
         num_warmup=args["num_warmup"],
@@ -194,3 +196,29 @@ def run_mcmc(rng_key, model_mcmc, args):
     mcmc.print_summary()
     print("\nMCMC elapsed time:", time.time() - start)
     return mcmc
+
+def get_samples(rng_key,model,guide,svi_result,args):
+    if args['model'] == 'hawkes':
+        sites = ['alpha','beta','sigmax_2','a_0']
+    elif args['model'] == 'lgcp':
+        sites = ['f_xy','f_t','a_0','z_temporal','z_spatial']
+    elif args['model'] == 'cox_hawkes':
+        sites = ['alpha','beta','sigmax_2','a_0','f_xy','f_t','z_temporal','z_spatial']
+    if 'spatial_cov' in args:
+        sites += ['w','b_0']
+    predictive = Predictive(model, guide=guide, params=svi_result.params, 
+                            return_sites = sites,
+                            num_samples=args["num_samples"])
+    posterior_samples = predictive(rng_key, args=args)
+    return posterior_samples
+
+def run_SVI(rng_key, model, args, num_steps = 10000, lr = 0.001, auto_guide = AutoMultivariateNormal, init_strategy=init_to_median,init_state=None):
+    start = time.time()
+    optimizer = numpyro.optim.Adam(inverse_time_decay(lr,num_steps,4))
+    #optimizer = numpyro.optim.Adam(exponential_decay(lr,num_steps,0.01))
+    guide = auto_guide(model,init_loc_fn=init_strategy)
+    svi = SVI(model, guide, optimizer, loss=Trace_ELBO())
+    svi_result = svi.run(rng_key, num_steps, args, stable_update=True, init_state=init_state)
+    posterior_samples = get_samples(rng_key,model,guide,svi_result,args)
+    print("\nSVI elapsed time:", time.time() - start)
+    return svi,svi_result,posterior_samples

@@ -20,18 +20,27 @@ from .utils import *
 from .inference_functions import *
 import pkgutil
 
-
 class Point_Process_Model:
     def __init__(self,data,A,model='cox_hawkes',spatial_cov=None,cov_names=None,cov_grid_size=None,**priors):
         """
-        Spatiotemporal Point Process Model.
+        Spatiotemporal Point Process Model given by,
+        
+        $$\lambda(t,s) = \mu(s,t) + \sum_{i:t_i<t}{\\alpha f(t-t_i;\\beta) \\varphi(s-s_i;\\sigma^2)}$$
+
+        where $f$ is the exponential pdf, $\\varphi$ is the gaussian pdf, and $\mu$ is given by
+        
+        $$\mu(s,t) = exp(a_0 + X(s)w + f_s(s) + f_t(t))$$
+
+        where $X(s)$ is the spatial covariate matrix, $f_s$ and $f_t$ are Gaussian Processes. 
+        Both $f_s$ and $f_t$ are simulated by a pretrained VAE. We used a squared exponential kernel with hyperparameters $l \sim InverseGamma(10,1)$ and $\sigma^2 \sim LogNormal(2,0.5)$ 
+
 
         Parameters
         ----------
         data: str or pd.DataFrame
             either file path or DataFrame containing spatiotemporal data. Columns must include 'X', 'Y', 'T'.
-        A: np.array [2x2]
-            Spatial region of interest. First row is the x-range, second row is y-range.
+        A: np.array [2x2], GeoDataFram
+            Spatial region of interest. If np.array first row is the x-range, second row is y-range.
         model: str
             one of ['cox_hawkes','lgcp','hawkes'].
         spatial_cov: str,pd.DataFrame,gpd.GeoDataFrame
@@ -194,12 +203,12 @@ class Point_Process_Model:
         #Set up parameter priors
         default_priors = {"a_0": dist.Normal(0,3),
                           "alpha": dist.Beta(1,1),
-                          "beta": dist.HalfNormal(0.3),
-                          "sigmax_2": dist.HalfNormal(1),
+                          "beta": dist.HalfNormal(4.0),
+                          "sigmax_2": dist.HalfNormal(0.25),
                          }
         if 'num_cov' in args:
             default_priors["w"] = dist.Normal(jnp.zeros(args['num_cov']),jnp.ones(args["num_cov"]))
-        
+        args['sp_var_mu'] = 3.0
         for par, prior in priors.items():
             if par in default_priors:
                 default_priors[par] = prior
@@ -208,6 +217,81 @@ class Point_Process_Model:
         args['priors'] = default_priors
         
         self.args = args
+
+    def load_rslts(self,file_name):
+        """
+        Load previously computed results
+        Parameters
+        ----------
+        file_name: string
+            File where pickled results are held
+        """
+        with open(file_name, 'rb') as f:
+            output = pickle.load(f)
+        self.mcmc = output['mcmc']
+        self.mcmc_samples = output['samples']
+
+    def save_rslts(self,file_name):
+        """
+        Save previously computed results
+        Parameters
+        ----------
+        file_name: string
+            File where to save results
+        """
+        output['mcmc'] = self.mcmc
+        output['samples'] = self.mcmc_samples
+        with open(file_name, 'wb') as f:
+            output = pickle.dump(output,f)
+        
+    
+    def run_svi(self,num_samples=1000,output_file=None,resume=False,**kwargs):
+        """
+        Perform Stochastic Variational Inference on the model.
+        Parameters
+        ----------
+        num_samples: int, default=1000
+            Number of samples to generate after SVI.
+        output_file: string, default=None
+            File name to save results.
+        resume: bool, default=False
+            Pick up where last SVI run was left off. Can only be true if model has previous run_svi call.
+        lr: float, default=0.001
+            learning rate for SVI
+        num_steps: int, default=10000
+            Number of interations for SVI to run.
+        auto_guide: numpyro AutoGuide, default=AutoMultivariateNormal
+            See numpyro AutoGuides for details.
+        init_strategy: function, default=init_to_median
+            See numpyro init strategy documentation
+        """
+        rng_key, rng_key_predict = random.split(random.PRNGKey(10))
+        rng_key, rng_key_post, rng_key_pred = random.split(rng_key, 3)
+        self.args["num_samples"] = num_samples
+        if self.args['model'] in ['cox_hawkes','hawkes']:
+            model = spatiotemporal_hawkes_model
+        else:
+            model = spatiotemporal_LGCP_model
+        if resume:
+            if 'num_steps' not in kwargs:
+                kwargs['num_steps'] = 10000
+            if 'lr' not in kwargs:
+                kwargs['lr'] = 0.001
+            optimizer = numpyro.optim.Adam(
+                jax.example_libraries.optimizers.inverse_time_decay(kwargs['lr'],kwargs['num_steps'],4)
+            )
+            self.svi.optim = optimizer
+            self.svi_results = self.svi.run(rng_key, kwargs['num_steps'], self.args,
+                                            init_state=self.svi_results.state)
+            self.mcmc_samples = get_samples(rng_key,model,self.svi.guide,self.svi_results,self.args)
+        else:
+            self.svi,self.svi_results,self.mcmc_samples=run_SVI(rng_key,model,self.args,**kwargs)
+        loss = np.asarray(self.svi_results.losses)
+        plt.plot(np.arange(int(.1*len(loss)),len(loss)),loss[int(.1*len(loss)):])
+        plt.xlabel("Iterations")
+        plt.ylabel("Loss")
+        plt.show()
+
     
     def run_mcmc(self,batch_size=1,num_warmup=500,num_samples=1000,num_chains=1,thinning=1,output_file=None):
         """
@@ -304,10 +388,10 @@ class Point_Process_Model:
         
         scale = 50/self.data['T'].max()
         post_mean = float(self.mcmc_samples['beta'].mean())
-        x = np.arange(0,3.5/(scale*post_mean),3.5/(scale*post_mean)/250)
+        x = np.arange(0,3.5*post_mean/scale,3.5*post_mean/scale/250)
         fig, ax = plt.subplots(figsize=(7,7))
         for b in np.random.choice(self.mcmc_samples['beta'],100):
-            plt.plot(x,b*np.exp(-b*scale*x),color='black',alpha=0.1)
+            plt.plot(x,np.exp(-scale/b*x)/b,color='black',alpha=0.1)
         fig.suptitle('Time Decay of Trigger Function')
         ax.set_ylabel('Trigger Intensity')
         ax.set_xlabel(t_units.capitalize()+' After First Event')
@@ -316,7 +400,7 @@ class Point_Process_Model:
         if output_file is not None:
             plt.savefig(output_file)
         plt.show()
-        print(f'Mean trigger time: {round(1/(post_mean*scale),2)} '+t_units)
+        print(f'Mean trigger time: {round(post_mean/scale,2)} '+t_units)
 
     def cov_weight_post_summary(self,plot_file=None,summary_file=None):
         """
@@ -408,6 +492,8 @@ class Point_Process_Model:
             Path in which to save plot.
         include_cov: bool
             Include effects of spatial covariates.
+        kwargs: dict
+            Plotting parameters for geopandas plot.
         """
         if 'mcmc_samples' not in dir(self):
             raise Exception("MCMC posterior sampling has not been performed yet.")

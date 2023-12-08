@@ -4,4 +4,5 @@ output/
 **/*.pkl
 **/.ipynb_checkpoints/
 html/
+doc_temp/
 VAE_Training.ipynb

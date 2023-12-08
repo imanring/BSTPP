@@ -20,6 +20,19 @@ from numpyro import optim
 from numpyro.infer import SVI, Trace_ELBO, MCMC, NUTS, init_to_median, Predictive
 from numpyro.diagnostics import hpdi
 
+import argparse
+parser = argparse.ArgumentParser()
+parser.add_argument("--length_scale", help="Inverse Gamma Scale Parameter for GP length",type=float,default=15)
+parser.add_argument("--length_shape", help="Inverse Gamma Scale Parameter for GP length",type=float,default=1)
+parser.add_argument("--var_scale", help="Log Normal Scale Parameter for GP variance",type=float,default=.5)
+parser.add_argument("--var_loc", help="Log Normal Location Parameter for GP variance",type=float,default=0)
+parser.add_argument("--hidden_dim1", help="Hidden Dimension Layer 1",type=int,default=45)
+parser.add_argument("--hidden_dim2", help="Hidden Dimension Layer 2",type=int,default=30)
+parser.add_argument("--z_dim", help="Hidden Dimension Layer 1",type=int,default=15)
+parser.add_argument("--num_epochs", help="Number of Epochs of Training",type=int,default=50)
+uargs = parser.parse_args()
+
+
 def dist_euclid(x, z):
     x = jnp.array(x) 
     z = jnp.array(z)
@@ -39,8 +52,8 @@ def dist_euclid(x, z):
 
 
 def exp_sq_kernel(x, z, var, length, noise=0, jitter=1.0e-6):
-    dist = dist_euclid(x, z)
-    deltaXsq = jnp.power(dist/ length, 2.0)
+    #dist = dist_euclid(x, z)
+    deltaXsq = jnp.power(dist_/ length, 2.0)
     k = var * jnp.exp(-0.5 * deltaXsq)
     k += (noise + jitter) * jnp.eye(x.shape[0])
     return k
@@ -49,10 +62,10 @@ def exp_sq_kernel(x, z, var, length, noise=0, jitter=1.0e-6):
 def GP(gp_kernel, x, jitter=1e-5, var=None, length=None, y=None, noise=False):
     
     if length==None:
-        length = numpyro.sample("kernel_length", dist.InverseGamma(12,1))
+        length = numpyro.sample("kernel_length", dist.InverseGamma(uargs.length_scale,uargs.length_shape))
         
     if var==None:
-        var = numpyro.sample("kernel_var", dist.LogNormal(0.,0.1))
+        var = numpyro.sample("kernel_var", dist.LogNormal(uargs.var_loc,uargs.var_scale))
         
     k = gp_kernel(x, x, var, length, jitter)
     
@@ -62,16 +75,6 @@ def GP(gp_kernel, x, jitter=1e-5, var=None, length=None, y=None, noise=False):
         sigma = numpyro.sample("noise", dist.HalfNormal(0.1))
         f = numpyro.sample("f", dist.MultivariateNormal(loc=jnp.zeros(x.shape[0]), covariance_matrix=k))
         numpyro.sample("y", dist.Normal(f, sigma), obs=y)
-
-def plot_draws(draws, ttl="Priors we want to encode", ylbl='$y=f_{GP}(x)$'):
-    fig = plt.figure()
-    ax = fig.add_subplot(111)
-    for i in range(draws.shape[0]):
-        ax.plot(x, draws[i,:])
-        if i>30: break
-    ax.set_xlabel('$x$')
-    ax.set_ylabel(ylbl)
-    ax.set_title(ttl)
 
 args = {"n": 625,
         "gp_kernel": exp_sq_kernel,
@@ -83,7 +86,7 @@ n_xy = 25
 grid = jnp.arange(0, 1, 1/n_xy)
 u, v = jnp.meshgrid(grid, grid)
 x_xy = jnp.array([u.flatten(), v.flatten()]).transpose((1, 0))
-
+dist_ = dist_euclid(x_xy, x_xy)
 rng_key, rng_key_predict = random.split(random.PRNGKey(4))
 gp_predictive = Predictive(GP, num_samples=args["batch_size"])
 
@@ -159,12 +162,12 @@ def eval_test(rng_key, svi_state, num_test):
 
     return loss
 
-args = {"num_epochs": 50, 
+args = {"num_epochs": uargs.num_epochs, 
         "learning_rate": 1.0e-3, 
         "batch_size": 100, 
-        "hidden_dim1": 35,
-        "hidden_dim2": 30,
-        "z_dim": 15,
+        "hidden_dim1": uargs.hidden_dim1,
+        "hidden_dim2": uargs.hidden_dim2,
+        "z_dim": uargs.z_dim,
          "x": x_xy,
         "n": len(x_xy),
         "gp_kernel": exp_sq_kernel,
