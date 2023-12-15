@@ -113,10 +113,12 @@ def spatiotemporal_hawkes_model(args):
     s1max=(x_max-xy_events[0])/(jnp.sqrt(2*sigmax_2))
     s1min=(xy_events[0]-x_min)/(jnp.sqrt(2*sigmax_2))
     gaussianpart1=0.5*jax.scipy.special.erf(s1max)+0.5*jax.scipy.special.erf(s1min)
+    numpyro.deterministic("gaussianpart1",gaussianpart1)
     
     s2max=(y_max-xy_events[1])/(jnp.sqrt(2*sigmay_2))
-    s2min=(xy_events[1]-y_max)/(jnp.sqrt(2*sigmay_2))
+    s2min=(xy_events[1]-y_min)/(jnp.sqrt(2*sigmay_2))
     gaussianpart2=0.5*jax.scipy.special.erf(s2max)+0.5*jax.scipy.special.erf(s2min)
+    numpyro.deterministic("gaussianpart2",gaussianpart2)
     gaussianpart=gaussianpart2*gaussianpart1
     numpyro.deterministic("gaussianpart",gaussianpart)    
 

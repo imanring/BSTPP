@@ -122,9 +122,11 @@ class Point_Process_Model:
         self.comp_grid = comp_grid
         geometry = gpd.points_from_xy(data.X, data.Y,crs=comp_grid.crs)
         self.points = gpd.GeoDataFrame(data=data,geometry=geometry)
+        self.points['point_id'] = np.arange(len(data))
         
         #find grid cells where points are located
-        args['indices_xy'] = self.points.sjoin(comp_grid)['comp_grid_id'].values
+        args['indices_xy'] = self.points.sjoin(comp_grid).sort_values(by='point_id')['comp_grid_id'].values
+        
         if len(args['indices_xy']) != len(self.points):
             raise Exception("Computational grid does not encompass all data points!")
         args["n_xy"]= n_xy
@@ -139,9 +141,9 @@ class Point_Process_Model:
         args["z_dim_temporal"]= 11
         args["T"]=T
         # spatial VAE training arguments
-        args["hidden_dim1_spatial"]= 35
-        args["hidden_dim2_spatial"]= 30
-        args["z_dim_spatial"]=15
+        args["hidden_dim1_spatial"]= 75
+        args["hidden_dim2_spatial"]= 50
+        args["z_dim_spatial"]=20
         
         if args['model'] in ['lgcp','cox_hawkes']:
             decoder_params = pickle.loads(pkgutil.get_data(__name__, "decoders/decoder_1d_T50_fixed_ls"))
@@ -149,7 +151,8 @@ class Point_Process_Model:
             
             #Load 2d spatial trained decoder
             #decoder_params = pickle.loads(pkgutil.get_data(__name__, "decoders/decoder_2d_n25_infer_hyperpars"))
-            decoder_params = pickle.loads(pkgutil.get_data(__name__, "decoders/2d_decoder_10_5.pkl"))
+            #decoder_params = pickle.loads(pkgutil.get_data(__name__, "decoders/2d_decoder_10_5.pkl"))
+            decoder_params = pickle.loads(pkgutil.get_data(__name__, "decoders/2d_decoder_15_5_large.pkl"))
             args["decoder_params_spatial"] = decoder_params
         
         if spatial_cov is not None:
