@@ -178,7 +178,7 @@ class Point_Process_Model:
             spatial_cov['cov_ind'] = np.arange(len(spatial_cov))
             #find covariate cell index for each point
             self.points.crs = spatial_cov.crs
-            args['cov_ind'] = self.points.sjoin(spatial_cov)['cov_ind'].values
+            args['cov_ind'] = self.points.sjoin(spatial_cov).sort_values(by='point_id')['cov_ind'].values
             if len(args['cov_ind']) != len(self.points):
                 raise Exception("Spatial covariates are not defined for all data points!")
             
