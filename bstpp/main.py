@@ -242,6 +242,7 @@ class Point_Process_Model:
         file_name: string
             File where to save results
         """
+        output = dict()
         output['mcmc'] = self.mcmc
         output['samples'] = self.mcmc_samples
         with open(file_name, 'wb') as f:
