@@ -22,6 +22,28 @@ from .utils import *
 from .inference_functions import *
 import pkgutil
 
+
+def load_Boko_Haram():
+    """
+    Load Boko Haram dataset
+    """
+    events = pd.read_csv(pkgutil.get_data(__name__, "data/BH_conflicts.csv"))
+    cov = pd.read_csv(pkgutil.get_data(__name__, "data/BH_cov.csv"))
+    return {"events":events, "covariates":cov}
+
+
+def load_Chicago_Shootings():
+    """
+    Load Chicago Shootings dataset
+    """
+    events_2022 = pd.read_csv(pkgutil.get_data(__name__, "data/Chicago_2022_xyt.csv"))
+    events_2023 = pd.read_csv(pkgutil.get_data(__name__, "data/Chicago_2023_xyt.csv"))
+    cov = gpd.read_file(pkgutil.get_data(__name__, "data/Chicago_cov.shp"))
+    boundaries = gpd.read_file(pkgutil.get_data(__name__, "data/Boundaries - Community Areas (current).zip"))
+    return {"events_2022":events_2022, "events_2023":events_2023,
+            "covariates":cov, "boundaries":boundaries}
+
+
 class Point_Process_Model:
     def __init__(self,data,A,model='cox_hawkes',spatial_cov=None,cov_names=None,cov_grid_size=None,**priors):
         """
