@@ -15,6 +15,8 @@ import jax.numpy as jnp
 from jax import random
 import numpyro.distributions as dist
 from numpyro.diagnostics import hpdi
+from jax.scipy.special import logsumexp
+from numpyro.infer import log_likelihood
 
 from .utils import * 
 from .inference_functions import *
@@ -34,6 +36,7 @@ class Point_Process_Model:
         where $X(s)$ is the spatial covariate matrix, $f_s$ and $f_t$ are Gaussian Processes. 
         Both $f_s$ and $f_t$ are simulated by a pretrained VAE. We used a squared exponential kernel with hyperparameters $l \sim InverseGamma(10,1)$ and $\sigma^2 \sim LogNormal(2,0.5)$ 
 
+        The data is rescaled to fit in a 1x1 spatial grid and a lenght 50 time window. Posterior samples must be interpreted with this in mind.
 
         Parameters
         ----------
@@ -67,11 +70,6 @@ class Point_Process_Model:
         args['y_max']=1
         args['model']=model
 
-        #scale temporal events
-        t_events_total=((data['T']-data['T'].min())).to_numpy()
-        t_events_total/=t_events_total.max()
-        t_events_total*=50
-
         if type(A) is gpd.GeoDataFrame:
             A_ = np.stack((A.bounds.min(axis=0)[['minx','miny']],
                       A.bounds.max(axis=0)[['maxx','maxy']])).T
@@ -80,18 +78,7 @@ class Point_Process_Model:
         else:# A is rectangle specified by np.array
             args['A_area'] = 1
             A_ = A
-        
-        #scale spatial events
-        x_range = A_[0]
-        x_events_total=(data['X']-x_range[0]).to_numpy()
-        x_events_total/=(x_range[1]-x_range[0])
-        y_range = A_[1]
-        y_events_total=(data['Y']-y_range[0]).to_numpy()
-        y_events_total/=(y_range[1]-y_range[0])
-        
-        xy_events_total=np.array((x_events_total,y_events_total)).transpose()
-        args["t_events"]=t_events_total
-        args["xy_events"]=xy_events_total.transpose()
+        args['A_'] = A_
         
         #create computational grid
         n_t=50
@@ -101,6 +88,7 @@ class Point_Process_Model:
         args["x_t"]=x_t
         
         n_xy = 25
+        args["n_xy"]= n_xy
         cols = np.arange(0, 1, 1/n_xy)
         polygons = []
         for y in cols:
@@ -120,21 +108,11 @@ class Point_Process_Model:
             args['spatial_grid_cells'] = np.arange(25**2)
         
         self.comp_grid = comp_grid
-        geometry = gpd.points_from_xy(data.X, data.Y,crs=comp_grid.crs)
-        self.points = gpd.GeoDataFrame(data=data,geometry=geometry)
-        self.points['point_id'] = np.arange(len(data))
         
-        #find grid cells where points are located
-        args['indices_xy'] = self.points.sjoin(comp_grid).sort_values(by='point_id')['comp_grid_id'].values
+        args,points = self._scale_xyt(data,args,comp_grid)
+        self.points = points
         
-        if len(args['indices_xy']) != len(self.points):
-            raise Exception("Computational grid does not encompass all data points!")
-        args["n_xy"]= n_xy
-        
-        args["gp_kernel"]=exp_sq_kernel
-        
-        args['indices_t']=np.searchsorted(x_t, t_events_total, side='right')-1
-        
+        args["gp_kernel"]=exp_sq_kernel        
         
         # temporal VAE training arguments
         args["hidden_dim_temporal"]= 35
@@ -211,7 +189,7 @@ class Point_Process_Model:
                          }
         if 'num_cov' in args:
             default_priors["w"] = dist.Normal(jnp.zeros(args['num_cov']),jnp.ones(args["num_cov"]))
-        args['sp_var_mu'] = 3.0
+        args['sp_var_mu'] = 2.0
         for par, prior in priors.items():
             if par in default_priors:
                 default_priors[par] = prior
@@ -333,6 +311,55 @@ class Point_Process_Model:
             with open(output_file, 'wb') as handle:
                 dill.dump(output_dict, handle)
 
+    def _scale_xyt(self,data,args,comp_grid):
+        #scale temporal events
+        t_events_total=((data['T']-data['T'].min())).to_numpy()
+        t_events_total/=t_events_total.max()
+        t_events_total*=50
+        args["t_events"]=t_events_total
+        args['indices_t']=np.searchsorted(args['x_t'], t_events_total, side='right')-1
+        
+        #scale spatial events
+        x_range = args['A_'][0]
+        x_events_total=(data['X']-x_range[0]).to_numpy()
+        x_events_total/=(x_range[1]-x_range[0])
+        y_range = args['A_'][1]
+        y_events_total=(data['Y']-y_range[0]).to_numpy()
+        y_events_total/=(y_range[1]-y_range[0])
+        
+        xy_events_total=np.array((x_events_total,y_events_total)).transpose()
+
+        geometry = gpd.points_from_xy(data.X, data.Y,crs=comp_grid.crs)
+        points = gpd.GeoDataFrame(data=data,geometry=geometry)
+        points['point_id'] = np.arange(len(data))
+        
+        #find grid cells where points are located
+        args['indices_xy'] = points.sjoin(comp_grid).sort_values(by='point_id')['comp_grid_id'].values
+        
+        if len(args['indices_xy']) != len(points):
+            raise Exception("Computational grid does not encompass all data points!")
+            
+        args["xy_events"]=xy_events_total.transpose()
+        return args,points
+
+    def log_point_wise_predictive_density(self,data):
+        #Based on https://programtalk.com/vs4/python/pyro-ppl/numpyro/examples/baseball.py/
+        if type(data)==str:
+            data = pd.read_csv(data)
+        test_args,points = self._scale_xyt(data,self.args.copy(),self.comp_grid)
+        test_args['cov_ind'] = points.sjoin(self.spatial_cov).sort_values(by='point_id')['cov_ind'].values
+        #print(len(test_args['cov_ind']),len(points),len(data))
+        if test_args['model'] in ['cox_hawkes','hawkes']:
+            post_loglik = log_likelihood(spatiotemporal_hawkes_model, self.mcmc_samples, test_args)["t_events"]
+        elif test_args['model'] == 'lgcp':
+            post_loglik = log_likelihood(spatiotemporal_LGCP_model, self.mcmc_samples, test_args)["t_events"]
+        
+        # computes expected log predictive density at each data point
+        exp_log_density = logsumexp(post_loglik, axis=0) - jnp.log(
+            jnp.shape(post_loglik)[0]
+        )
+        return exp_log_density.sum().item()
+    
     def plot_trigger_posterior(self,output_file=None):
         """
         Plot histograms of posterior trigger parameters.
@@ -392,6 +419,7 @@ class Point_Process_Model:
         
         scale = 50/self.data['T'].max()
         post_mean = float(self.mcmc_samples['beta'].mean())
+        print(f'Mean trigger time: {round(post_mean/scale,2)} '+t_units)
         x = np.arange(0,3.5*post_mean/scale,3.5*post_mean/scale/250)
         fig, ax = plt.subplots(figsize=(7,7))
         for b in np.random.choice(self.mcmc_samples['beta'],100):
@@ -404,7 +432,6 @@ class Point_Process_Model:
         if output_file is not None:
             plt.savefig(output_file)
         plt.show()
-        print(f'Mean trigger time: {round(post_mean/scale,2)} '+t_units)
 
     def cov_weight_post_summary(self,plot_file=None,summary_file=None):
         """
