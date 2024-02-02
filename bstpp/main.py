@@ -78,7 +78,8 @@ class Point_Process_Model:
         model: str
             one of ['cox_hawkes','lgcp','hawkes'].
         spatial_cov: str,pd.DataFrame,gpd.GeoDataFrame
-            Either file path (.csv or .shp), DataFrame, or GeoDataFrame containing spatial covariates. Spatial covariates must cover all the points in data.
+            Either file path (.csv or .shp), DataFrame, or GeoDataFrame containing spatial covariates. 
+            Spatial covariates must cover all the points in data.
             If spatial_cov is a csv or pd.DataFrame, the first 2 columns must be 'X', 'Y' and cov_grid_size must be specified.
         cov_names: list
             List of covariate names. Must all be columns in spatial_cov.
@@ -313,8 +314,6 @@ class Point_Process_Model:
         num_samples: int
         num_chains: int
         thinning: int
-        output_file: str
-            File to save output to.
         """
         self.args["batch_size"]= batch_size
         self.args["num_warmup"]= num_warmup
@@ -361,11 +360,12 @@ class Point_Process_Model:
 
     def log_expected_likelihood(self,data):
         """
-        Computes the log expected likelihood for test data
+        Computes the log expected likelihood for test data.
+        
         Parameters
         ----------
-            data: pd.DataFrame or str
-                test events in the same format as original event dataset.
+        data: pd.DataFrame or str
+            test events in the same format as original event dataset.
         """
         #Based on https://programtalk.com/vs4/python/pyro-ppl/numpyro/examples/baseball.py/
         if type(data)==str:

@@ -7,15 +7,25 @@ import jax
 class Trigger(ABC):
     def __init__(self,prior):
         """
+        Abstract Trigger class to be extented for Hawkes models.
+        
         Parameters
         ----------
-            prior: dict of numpyro distributions
-                Used to sample parameters for 
+        prior: dict of numpyro distributions
+            Used to sample parameters for 
         """
         self.prior = prior
 
     @abstractmethod
     def sample_parameters(self):
+        """
+        Sample parameters using numpyro
+        e.g. return {'beta': numpyro.sample('beta', self.prior['beta'])}
+        
+        Returns
+        -------
+        dict of a single sample of parameters
+        """
         pass
     
     @abstractmethod
@@ -24,16 +34,16 @@ class Trigger(ABC):
         Compute the trigger function
         Parameters
         ----------
-            pars: 
-                results from sample_parameters
-            mat: jax numpy matrix
-                Difference matrix, whose shape is different for each kind of trigger.
-                     temporal triggers - [n, n]
-                     spatial triggers - [2, n, n]
-                     spatiotemporal triggers - [3, n, n]
+        pars: dict
+            results from sample_parameters
+        mat: jax numpy matrix
+            Difference matrix, whose shape is different for each kind of trigger.
+                 temporal triggers - [n, n]
+                 spatial triggers - [2, n, n]
+                 spatiotemporal triggers - [3, n, n]
         Returns
         -------
-            jax numpy matrix [n,n]
+        jax numpy matrix [n,n]
         """
         pass
     
@@ -41,17 +51,18 @@ class Trigger(ABC):
     def compute_integral(self,pars,dif):
         """
         Compute the integral of the trigger function
-        Parameters:
-            pars: 
-                results from sample_parameters
-            dif: jax numpy matrix
-                limits of integration with shape
-                    temporal - [n]
-                    spatial - [2, 2, n]
-                    spatiotemporal - ([n], [2, 2, n])
+        Parameters
+        -----------
+        pars: dict
+            results from sample_parameters
+        dif: jax numpy matrix
+            limits of integration with shape
+                temporal - [n]
+                spatial - [2, 2, n]
+                spatiotemporal - ([n], [2, 2, n])
         Returns
         -------
-            jax numpy [n]
+        jax numpy [n]
         """
         pass
 
@@ -60,11 +71,14 @@ class Trigger(ABC):
         """
         Returns
         -------
-            list: names of parameters
+        list of names of parameters
         """
         pass
 
 class Temporal_Power_Law(Trigger):
+    """
+    Power Law Temporal trigger. Lomax distribution.
+    """
     def sample_parameters(self):
         sample = {}
         sample['beta'] = numpyro.sample('beta', self.prior['beta'])
@@ -82,6 +96,9 @@ class Temporal_Power_Law(Trigger):
         return ['beta','gamma']
 
 class Temporal_Exponential(Trigger):
+    """
+    Temporal exponential trigger function.
+    """
     def sample_parameters(self):
         sample = {}
         sample['beta'] = numpyro.sample('beta', self.prior['beta'])
@@ -98,6 +115,9 @@ class Temporal_Exponential(Trigger):
 
 
 class Spatial_Symmetric_Gaussian(Trigger):
+    """
+    Single parameter symmetric spatial gaussian trigger.
+    """
     def sample_parameters(self):
         sample = {}
         sample['sigmax_2'] = numpyro.sample('sigmax_2', self.prior['sigmax_2'])
