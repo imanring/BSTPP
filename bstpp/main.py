@@ -1,5 +1,6 @@
 # general libraries
 import os
+from io import BytesIO
 import numpy as np
 import pandas as pd
 import geopandas as gpd
@@ -20,32 +21,50 @@ from numpyro.infer import log_likelihood
 
 from .utils import * 
 from .inference_functions import *
+from .trigger import *
+
 import pkgutil
 
 
 def load_Boko_Haram():
     """
     Load Boko Haram dataset
+    Returns
+    -------
+    dict
+        events: event dataset from https://ucdp.uu.se/downloads/
+        covariates: covariates from PRIO-GRID (https://grid.prio.org/#/)
     """
-    events = pd.read_csv(pkgutil.get_data(__name__, "data/BH_conflicts.csv"))
-    cov = pd.read_csv(pkgutil.get_data(__name__, "data/BH_cov.csv"))
+    events = pd.read_csv(BytesIO(pkgutil.get_data(__name__, "data/BH_conflicts.csv")))
+    cov = pd.read_csv(BytesIO(pkgutil.get_data(__name__, "data/BH_cov.csv")))
     return {"events":events, "covariates":cov}
 
 
 def load_Chicago_Shootings():
     """
     Load Chicago Shootings dataset
+    Returns
+    -------
+    dict
+        Shooting report data from:
+            https://data.cityofchicago.org/Public-Safety/Chicago-Shootings/fsku-dr7m
+        Community Area boundaries from:
+            https://data.cityofchicago.org/Facilities-Geographic-Boundaries/Boundaries-Community-Areas-current-/cauq-8yn6
+        Community Area Covariates from:
+            https://datahub.cmap.illinois.gov/maps/2a0b0316dc2c4ecfa40a171c635503f8/about
     """
-    events_2022 = pd.read_csv(pkgutil.get_data(__name__, "data/Chicago_2022_xyt.csv"))
-    events_2023 = pd.read_csv(pkgutil.get_data(__name__, "data/Chicago_2023_xyt.csv"))
-    cov = gpd.read_file(pkgutil.get_data(__name__, "data/Chicago_cov.shp"))
-    boundaries = gpd.read_file(pkgutil.get_data(__name__, "data/Boundaries - Community Areas (current).zip"))
+    events_2022 = pd.read_csv(BytesIO(pkgutil.get_data(__name__, "data/Chicago_2022_xyt.csv")))
+    events_2023 = pd.read_csv(BytesIO(pkgutil.get_data(__name__, "data/Chicago_2023_xyt.csv")))
+    cov = gpd.read_file(BytesIO(pkgutil.get_data(__name__, "data/Chicago_cov.zip")))
+    boundaries = gpd.read_file(BytesIO(pkgutil.get_data(__name__, "data/Boundaries - Community Areas (current).zip")))
     return {"events_2022":events_2022, "events_2023":events_2023,
             "covariates":cov, "boundaries":boundaries}
 
 
 class Point_Process_Model:
-    def __init__(self,data,A,model='cox_hawkes',spatial_cov=None,cov_names=None,cov_grid_size=None,**priors):
+    def __init__(self,data,A,model='cox_hawkes',spatial_cov=None,cov_names=None,
+                 cov_grid_size=None,standardize_cov=True,temporal_trig=Temporal_Exponential,
+                 spatial_trig=Spatial_Symmetric_Gaussian,**priors):
         """
         Spatiotemporal Point Process Model given by,
         
@@ -75,6 +94,8 @@ class Point_Process_Model:
             List of covariate names. Must all be columns in spatial_cov.
         cov_grid_size: list-like
             Spatial covariate grid (width, height).
+        standardize_cov: bool
+            Standardize covariates
         priors: dict
             priors for parameters (a_0,w,alpha,beta,sigmax_2). Must be a numpyro distribution.
         """
@@ -150,15 +171,14 @@ class Point_Process_Model:
             args["decoder_params_temporal"] = decoder_params
             
             #Load 2d spatial trained decoder
-            #decoder_params = pickle.loads(pkgutil.get_data(__name__, "decoders/decoder_2d_n25_infer_hyperpars"))
-            #decoder_params = pickle.loads(pkgutil.get_data(__name__, "decoders/2d_decoder_10_5.pkl"))
             decoder_params = pickle.loads(pkgutil.get_data(__name__, "decoders/2d_decoder_15_5_large.pkl"))
             args["decoder_params_spatial"] = decoder_params
+
         
         if spatial_cov is not None:
             #convert input into geopandas dataframe.
             if type(spatial_cov)==str:
-                if spatial_cov[-4:] == '.shp':
+                if spatial_cov[-4:] == '.zip' or spatial_cov[-4:] == '.shp':
                     spatial_cov = gpd.read_file(spatial_cov)
                 else:
                     spatial_cov = pd.read_csv(spatial_cov)
@@ -188,7 +208,10 @@ class Point_Process_Model:
             
             X_s = spatial_cov[self.cov_names].values
             # standardize covariates
-            args['spatial_cov'] = (X_s-X_s.mean(axis=0))/(X_s.var(axis=0)**0.5)
+            if standardize_cov:
+                args['spatial_cov'] = (X_s-X_s.mean(axis=0))/(X_s.var(axis=0)**0.5)
+            else:
+                args['spatial_cov'] = X_s
             
             #Create Computational Grid GeoDataFrame
             if args['model'] in ['lgcp','cox_hawkes']:
@@ -213,10 +236,12 @@ class Point_Process_Model:
             default_priors["w"] = dist.Normal(jnp.zeros(args['num_cov']),jnp.ones(args["num_cov"]))
         args['sp_var_mu'] = 2.0
         for par, prior in priors.items():
-            if par in default_priors:
-                default_priors[par] = prior
-            else:
-                warnings.warn(f'\"{par}\" prior is not being used. There is no such parameter in the model.') 
+            default_priors[par] = prior
+
+        if args['model'] in ['hawkes','cox_hawkes']:
+            args['t_trig'] = temporal_trig(default_priors)
+            args['sp_trig'] = spatial_trig(default_priors)
+        
         args['priors'] = default_priors
         
         self.args = args
@@ -297,7 +322,8 @@ class Point_Process_Model:
         plt.show()
 
     
-    def run_mcmc(self,batch_size=1,num_warmup=500,num_samples=1000,num_chains=1,thinning=1,output_file=None):
+    def run_mcmc(self,batch_size=1,num_warmup=500,num_samples=1000,
+                 num_chains=1,thinning=1,output_file=None):
         """
         Run MCMC posterior sampling on model.
         
@@ -364,13 +390,20 @@ class Point_Process_Model:
         args["xy_events"]=xy_events_total.transpose()
         return args,points
 
-    def log_point_wise_predictive_density(self,data):
+    def log_expected_likelihood(self,data):
+        """
+        Computes the log expected likelihood for test data
+        Parameters
+        ----------
+            data: pd.DataFrame or str
+                test events in the same format as original event dataset.
+        """
         #Based on https://programtalk.com/vs4/python/pyro-ppl/numpyro/examples/baseball.py/
         if type(data)==str:
             data = pd.read_csv(data)
         test_args,points = self._scale_xyt(data,self.args.copy(),self.comp_grid)
         test_args['cov_ind'] = points.sjoin(self.spatial_cov).sort_values(by='point_id')['cov_ind'].values
-        #print(len(test_args['cov_ind']),len(points),len(data))
+
         if test_args['model'] in ['cox_hawkes','hawkes']:
             post_loglik = log_likelihood(spatiotemporal_hawkes_model, self.mcmc_samples, test_args)["t_events"]
         elif test_args['model'] == 'lgcp':
@@ -382,12 +415,14 @@ class Point_Process_Model:
         )
         return exp_log_density.sum().item()
     
-    def plot_trigger_posterior(self,output_file=None):
+    def plot_trigger_posterior(self,rescale=True,output_file=None):
         """
         Plot histograms of posterior trigger parameters.
         
         Parameters
         ----------
+        rescale: bool
+            Scale posteriors to original dimensions of the data.
         output_file: str
             Path in which to save plot.
         Returns
@@ -399,28 +434,33 @@ class Point_Process_Model:
             raise Exception("MCMC posterior sampling has not been performed yet.")
         if self.args['model'] not in ['hawkes','cox_hawkes']:
             raise Exception("This is not a Hawkes Model. Cannot plot trigger parameters.")
-        fig, ax = plt.subplots(1, 3,figsize=(8,4), sharex=False)
+        b_scale = 1.
+        s_x_scale = 1.
+        if rescale:
+            b_scale = 50/self.data['T'].max()
+            s_x_scale = self.args['A_'][0,1]-self.args['A_'][0,0]
+
+        par_names = self.args['t_trig'].get_par_names()+self.args['sp_trig'].get_par_names()
+        fig, ax = plt.subplots(1, 1+len(par_names),figsize=(8,4), sharex=False)
         plt.suptitle("Trigger Parameter Posteriors")
         ax[0].hist(self.mcmc_samples['alpha'])
         ax[0].set_xlabel(r"${\alpha} $")
-        ax[1].hist(self.mcmc_samples['beta'])
-        ax[1].set_xlabel(r"$\beta$")
-        ax[2].hist(self.mcmc_samples['sigmax_2']**0.5)
-        ax[2].set_xlabel('$\sigma$')
+        for i in range(len(par_names)):
+            ax[i+1].hist(self.mcmc_samples[par_names[i]])
+            ax[i+1].set_xlabel(par_names[i])
         if output_file is not None:
             plt.savefig(output_file)
         plt.show()
 
-        trig_pos = np.concatenate((self.mcmc_samples['alpha'].reshape(-1,1),
-                                  self.mcmc_samples['beta'].reshape(-1,1),
-                                  self.mcmc_samples['sigmax_2'].reshape(-1,1)**0.5),axis=1)
+        trig_pos = np.stack([self.mcmc_samples[name] for name in ['alpha']+par_names]).T
+        
         mean = trig_pos.mean(axis=0)
         std = trig_pos.var(axis=0)**0.5
         z_score = np.asarray(mean/std)
         p_val = 1-np.vectorize(erf)(abs(z_score)/2**0.5)
         quantiles = np.quantile(trig_pos,[0.025,0.975],axis=0)
         trig_summary = pd.DataFrame({'Post Mean':mean,'Post Std':std,'z':z_score,'P>|z|':p_val,
-                      '[0.025':quantiles[0],'0.975]':quantiles[1]},index=['alpha','beta','sigma'])
+                      '[0.025':quantiles[0],'0.975]':quantiles[1]},index=['alpha']+par_names)
         return trig_summary
     
     def plot_trigger_time_decay(self,output_file=None,t_units='days'):
@@ -439,13 +479,20 @@ class Point_Process_Model:
         if self.args['model'] not in ['hawkes','cox_hawkes']:
             raise Exception("This is not a Hawkes Model. Cannot plot trigger parameters.")
         
+        par_names = self.args['t_trig'].get_par_names()
+        post_mean = {}
+        for name in par_names:
+            post_mean[name] = self.mcmc_samples[name].mean().item()
         scale = 50/self.data['T'].max()
-        post_mean = float(self.mcmc_samples['beta'].mean())
-        print(f'Mean trigger time: {round(post_mean/scale,2)} '+t_units)
-        x = np.arange(0,3.5*post_mean/scale,3.5*post_mean/scale/250)
+        #estimate a good maximum
+        t = self.args['t_trig'].compute_integral(post_mean,self.args['T']/10)
+        t = np.arange(0,self.args['T']/(10*t),self.args['T']/(10*t*250))
         fig, ax = plt.subplots(figsize=(7,7))
-        for b in np.random.choice(self.mcmc_samples['beta'],100):
-            plt.plot(x,np.exp(-scale/b*x)/b,color='black',alpha=0.1)
+        for i in np.random.choice(np.arange(len(self.mcmc_samples['alpha'])),100):
+            pars = {}
+            for name in par_names:
+                pars[name] = self.mcmc_samples[name][i].item()
+            plt.plot(t/scale,self.args['t_trig'].compute_trigger(pars,t),color='black',alpha=0.1)
         fig.suptitle('Time Decay of Trigger Function')
         ax.set_ylabel('Trigger Intensity')
         ax.set_xlabel(t_units.capitalize()+' After First Event')
@@ -453,7 +500,6 @@ class Point_Process_Model:
         ax.axvline(0,color='black',linestyle='--')
         if output_file is not None:
             plt.savefig(output_file)
-        plt.show()
 
     def cov_weight_post_summary(self,plot_file=None,summary_file=None):
         """
@@ -502,12 +548,14 @@ class Point_Process_Model:
             w_summary.to_csv(summary_file)
         return w_summary
     
-    def plot_temporal_background(self,output_file=None):
+    def plot_temporal_background(self,rescale=True,output_file=None):
         """
         Plot mean posterior temporal gaussian process.
         
         Parameters
         ----------
+        rescale: bool
+            Scale posteriors to original dimensions of the data.
         plot_file: str
             Path in which to save plot.
         """
@@ -516,15 +564,17 @@ class Point_Process_Model:
         if self.args['model'] not in ['cox_hawkes','lgcp']:
             raise Exception("Nothing to plot: temporal background in constant.")
         
-        x_t = jnp.arange(0, self.args['T'], self.args['T']/self.args["n_t"])
+        b_scale = 1.
+        if rescale:
+            b_scale = 50/self.data['T'].max()
+        x_t = jnp.arange(0, self.args['T'], self.args['T']/self.args["n_t"])/b_scale
         f_t_post=self.mcmc_samples["f_t"]
         f_t_hpdi = hpdi(self.mcmc_samples["f_t"])
         f_t_post_mean=jnp.mean(f_t_post, axis=0)
         
         fig,ax=plt.subplots(1,1,figsize=(8,5))
         event_time_height = np.ones(len(self.args['t_events']))*f_t_hpdi.min()
-        #np.ones(len(self.args['t_events']))*(f_t_post_mean.min()-f_t_post_mean.var()**0.5/4)
-        ax.plot(self.args['t_events'], event_time_height,'+',color="red", 
+        ax.plot(self.args['t_events']/b_scale, event_time_height,'+',color="red", 
                 alpha=.15, label="observed times")
         ax.set_ylabel('$f_t$')
         ax.set_xlabel('t')

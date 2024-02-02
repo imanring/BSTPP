@@ -83,23 +83,21 @@ def spatiotemporal_hawkes_model(args):
 
 
     #### EXPONENTIAL KERNEL for the excitation part
-    #temporal exponential kernel parameters
+    #alpha is the reproduction rate
     alpha = numpyro.sample("alpha", args['priors']['alpha'])
-    beta = numpyro.sample("beta", args['priors']['beta'])
     
     #spatial gaussian kernel parameters     
-    sigmax_2 = numpyro.sample("sigmax_2", args['priors']['sigmax_2'])
-    sigmay_2 = sigmax_2
-    
+    t_pars = args['t_trig'].sample_parameters()
+    sp_pars = args['sp_trig'].sample_parameters()
     
     T,x_min,x_max,y_min,y_max = args['T'],args['x_min'],args['x_max'],args['y_min'],args['y_max']  
     
     T_diff=difference_matrix(t_events);
     S_mat_x = difference_matrix(xy_events[0])
     S_mat_y = difference_matrix(xy_events[1])
-    S_diff_sq=(S_mat_x**2)/sigmax_2+(S_mat_y**2)/sigmay_2; 
-    l_hawkes_sum=alpha/(beta*2*jnp.pi*jnp.sqrt(sigmax_2*sigmay_2))*jnp.exp(-T_diff/beta-0.5*S_diff_sq)
-    l_hawkes = numpyro.deterministic('l_hawkes',jnp.sum(jnp.tril(l_hawkes_sum,-1),1))
+    l_hawkes_sum = args['t_trig'].compute_trigger(t_pars,T_diff)*\
+                args['sp_trig'].compute_trigger(sp_pars,jnp.stack((S_mat_x,S_mat_y)))
+    l_hawkes = numpyro.deterministic('l_hawkes',alpha*jnp.sum(jnp.tril(l_hawkes_sum,-1),1))
 
     if args['model'] == 'hawkes':
       ell_1=numpyro.deterministic('ell_1',jnp.sum(jnp.log(l_hawkes+mu_xyt_events)))
@@ -107,23 +105,17 @@ def spatiotemporal_hawkes_model(args):
       ell_1=numpyro.deterministic('ell_1',jnp.sum(jnp.log(l_hawkes+jnp.exp(a_0 + f_t_events+f_xy_events))))
 
     #### hawkes integral
-    exponpart = alpha*(1-jnp.exp(-(T-t_events)/beta))
-    numpyro.deterministic("exponpart",exponpart)
+    temp_part = alpha*args['t_trig'].compute_integral(t_pars,T-t_events)
+
+
+    sp_limits = jnp.stack((x_max-xy_events[0],xy_events[0]-x_min,
+                           y_max-xy_events[1],xy_events[1]-y_min)
+                         ).reshape(2,2,-1)
     
-    s1max=(x_max-xy_events[0])/(jnp.sqrt(2*sigmax_2))
-    s1min=(xy_events[0]-x_min)/(jnp.sqrt(2*sigmax_2))
-    gaussianpart1=0.5*jax.scipy.special.erf(s1max)+0.5*jax.scipy.special.erf(s1min)
-    numpyro.deterministic("gaussianpart1",gaussianpart1)
-    
-    s2max=(y_max-xy_events[1])/(jnp.sqrt(2*sigmay_2))
-    s2min=(xy_events[1]-y_min)/(jnp.sqrt(2*sigmay_2))
-    gaussianpart2=0.5*jax.scipy.special.erf(s2max)+0.5*jax.scipy.special.erf(s2min)
-    numpyro.deterministic("gaussianpart2",gaussianpart2)
-    gaussianpart=gaussianpart2*gaussianpart1
-    numpyro.deterministic("gaussianpart",gaussianpart)    
+    sp_part = args['sp_trig'].compute_integral(sp_pars,sp_limits)
 
     ## total integral
-    Itot_txy=jnp.sum(exponpart*gaussianpart)+Itot_txy_back
+    Itot_txy=jnp.sum(temp_part*sp_part)+Itot_txy_back
     numpyro.deterministic("Itot_txy",Itot_txy)
     loglik=numpyro.deterministic('loglik',ell_1-Itot_txy)
 
