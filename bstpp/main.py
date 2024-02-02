@@ -402,7 +402,8 @@ class Point_Process_Model:
         if type(data)==str:
             data = pd.read_csv(data)
         test_args,points = self._scale_xyt(data,self.args.copy(),self.comp_grid)
-        test_args['cov_ind'] = points.sjoin(self.spatial_cov).sort_values(by='point_id')['cov_ind'].values
+        if 'cov_ind' in self.args:
+            test_args['cov_ind'] = points.sjoin(self.spatial_cov).sort_values(by='point_id')['cov_ind'].values
 
         if test_args['model'] in ['cox_hawkes','hawkes']:
             post_loglik = log_likelihood(spatiotemporal_hawkes_model, self.mcmc_samples, test_args)["t_events"]
