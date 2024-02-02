@@ -10,13 +10,13 @@ setup(
     name='BSTPP',
     version=0.1,
 
-    url='https://github.com/imanring/Cox_Hawkes_Cov.git',
+    url='https://github.com/imanring/BSTPP.git',
     author='Isaac Manring',
     author_email='isaacamanring@gmail.com',
     
     install_requires=modules,
     packages=['bstpp'],
-    package_data={'bstpp': ['decoders/*']},
+    package_data={'bstpp': ['decoders/*','data/*']},
     
     license = 'MIT',
     py_modules=['bstpp'],

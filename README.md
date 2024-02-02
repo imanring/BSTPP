@@ -9,7 +9,7 @@ This package provides bayesian inference for three spatiotemporal point process 
 ### Usage
 
 Install with
-```pip install git+https://github.com/imanring/Cox_Hawkes_Cov.git```
+```pip install git+https://github.com/imanring/BSTPP.git```
 
 API documentation is in ```bstpp_API_doc.pdf```.
 
@@ -24,7 +24,7 @@ $\lambda(t,s) = \mu(t,s) + \sum_{i:t_i < t}{\alpha f(t-t_i;\beta) \varphi(s-s_i;
 
 
 
-$f$ is the exponential density and $\varphi$ is the normal density.
+$f$ by default is the exponential density and $\varphi$ by default is the normal density.
 
 
 
