@@ -242,7 +242,7 @@ class Point_Process_Model:
         with open(file_name, 'rb') as f:
             output = pickle.load(f)
         self.mcmc = output['mcmc']
-        self.mcmc_samples = output['samples']
+        self.samples = output['samples']
 
     def save_rslts(self,file_name):
         """
@@ -254,7 +254,7 @@ class Point_Process_Model:
         """
         output = dict()
         output['mcmc'] = self.mcmc
-        output['samples'] = self.mcmc_samples
+        output['samples'] = self.samples
         with open(file_name, 'wb') as f:
             output = pickle.dump(output,f)
         
@@ -291,9 +291,9 @@ class Point_Process_Model:
             self.svi.optim = optimizer
             self.svi_results = self.svi.run(rng_key, kwargs['num_steps'], self.args,
                                             init_state=self.svi_results.state)
-            self.mcmc_samples = get_samples(rng_key,self.model,self.svi.guide,self.svi_results,self.args)
+            self.samples = get_samples(rng_key,self.model,self.svi.guide,self.svi_results,self.args)
         else:
-            self.svi,self.svi_results,self.mcmc_samples=run_SVI(rng_key,model,self.args,**kwargs)
+            self.svi,self.svi_results,self.samples=run_SVI(rng_key,self.model,self.args,**kwargs)
         loss = np.asarray(self.svi_results.losses)
         plt.plot(np.arange(int(.1*len(loss)),len(loss)),loss[int(.1*len(loss)):])
         plt.xlabel("Iterations")
@@ -324,7 +324,7 @@ class Point_Process_Model:
         rng_key, rng_key_post, rng_key_pred = random.split(rng_key, 3)
         
         self.mcmc = run_mcmc(rng_key_post, self.model, self.args)
-        self.mcmc_samples=self.mcmc.get_samples()
+        self.samples=self.mcmc.get_samples()
         
 
     def _scale_xyt(self,data,args,comp_grid):
@@ -374,7 +374,7 @@ class Point_Process_Model:
         if 'cov_ind' in self.args:
             test_args['cov_ind'] = points.sjoin(self.spatial_cov).sort_values(by='point_id')['cov_ind'].values
 
-        post_loglik = log_likelihood(self.model, self.mcmc_samples, test_args)["t_events"]
+        post_loglik = log_likelihood(self.model, self.samples, test_args)["t_events"]
         
         # computes expected log likelihood over the posterior
         exp_log_density = logsumexp(post_loglik, axis=0) - jnp.log(
@@ -391,24 +391,24 @@ class Point_Process_Model:
         pd.DataFrame
             summary of weights and bias
         """
-        if 'mcmc_samples' not in dir(self):
+        if 'samples' not in dir(self):
             raise Exception("MCMC posterior sampling has not been performed yet.")
         if 'spatial_cov' not in self.args:
             raise Exception("Spatial covariates were not included in the model.")
         
-        n = self.mcmc_samples['w'].shape[1]+1
+        n = self.samples['w'].shape[1]+1
         c = ceil(n**0.5)
         r = ceil(n/c)
         fig, ax = plt.subplots(r,c,figsize=(10,10), sharex=False)
         fig.suptitle('Covariate Weights', fontsize=16)
         for i in range(n-1):
-            ax[i//c,i%c].hist(self.mcmc_samples['w'].T[i])
+            ax[i//c,i%c].hist(self.samples['w'].T[i])
             ax[i//c,i%c].set_xlabel(self.cov_names[i])
-        ax[(n-1)//c,(n-1)%c].hist(self.mcmc_samples['a_0'])
+        ax[(n-1)//c,(n-1)%c].hist(self.samples['a_0'])
         ax[(n-1)//c,(n-1)%c].set_xlabel("$a_0$")
 
         
-        w_samps = np.concatenate((self.mcmc_samples['w'],self.mcmc_samples['a_0'].reshape(-1,1)),axis=1)
+        w_samps = np.concatenate((self.samples['w'],self.samples['a_0'].reshape(-1,1)),axis=1)
         mean = w_samps.mean(axis=0)
         std = w_samps.var(axis=0)**0.5
         z_score = np.asarray(mean/std)
@@ -427,7 +427,7 @@ class Point_Process_Model:
         rescale: bool
             Scale posteriors to original dimensions of the data.
         """
-        if 'mcmc_samples' not in dir(self):
+        if 'samples' not in dir(self):
             raise Exception("MCMC posterior sampling has not been performed yet.")
         if self.args['model'] not in ['cox_hawkes','lgcp']:
             raise Exception("Nothing to plot: temporal background in constant.")
@@ -436,8 +436,8 @@ class Point_Process_Model:
         if rescale:
             b_scale = 50/self.data['T'].max()
         x_t = jnp.arange(0, self.args['T'], self.args['T']/self.args["n_t"])/b_scale
-        f_t_post=self.mcmc_samples["f_t"]
-        f_t_hpdi = hpdi(self.mcmc_samples["f_t"])
+        f_t_post=self.samples["f_t"]
+        f_t_hpdi = hpdi(self.samples["f_t"])
         f_t_post_mean=jnp.mean(f_t_post, axis=0)
         
         fig,ax=plt.subplots(1,1,figsize=(8,5))
@@ -461,7 +461,7 @@ class Point_Process_Model:
         kwargs: dict
             Plotting parameters for geopandas plot.
         """
-        if 'mcmc_samples' not in dir(self):
+        if 'samples' not in dir(self):
             raise Exception("MCMC posterior sampling has not been performed yet.")
         if self.args['model'] not in ['cox_hawkes','lgcp'] and not include_cov:
             raise Exception("Nothing to plot: spatial background is constant")
@@ -483,7 +483,7 @@ class Point_Process_Model:
         Plot spatial for computational grid only
         """
         
-        f_xy_post = self.mcmc_samples["f_xy"]
+        f_xy_post = self.samples["f_xy"]
         f_xy_post_mean=jnp.mean(f_xy_post, axis=0)
         self.comp_grid['f_xy_post_mean'] = f_xy_post_mean
         intersect = gpd.overlay(self.comp_grid, self.A[['geometry']], how='intersection',keep_geom_type=True)
@@ -499,8 +499,8 @@ class Point_Process_Model:
         """
         Plot spatial for computational grid and spatial covariates.
         """
-        post_samples = (self.mcmc_samples['b_0'][:,self.args['int_df']['cov_ind'].values] + 
-                        self.mcmc_samples["f_xy"][:,self.args['int_df']['comp_grid_id'].values])
+        post_samples = (self.samples['b_0'][:,self.args['int_df']['cov_ind'].values] + 
+                        self.samples["f_xy"][:,self.args['int_df']['comp_grid_id'].values])
         self.args['int_df']['post_mean'] = post_samples.mean(axis=0)
         fig, ax = plt.subplots(1,2, figsize=(10, 5))
         self.args['int_df'].plot(column='post_mean',ax=ax[0])
@@ -513,7 +513,7 @@ class Point_Process_Model:
         """
         Plot spatial for covariates only.
         """
-        self.spatial_cov['post_mean'] = self.mcmc_samples['b_0'].mean(axis=0)
+        self.spatial_cov['post_mean'] = self.samples['b_0'].mean(axis=0)
         fig, ax = plt.subplots(1,2, figsize=(10, 5))
         self.spatial_cov.plot(column='post_mean',ax=ax[0])
         ax[0].set_title('Mean Posterior $X(s)w$')
@@ -577,19 +577,19 @@ class Hawkes_Model(Point_Process_Model):
         pd.DataFrame
             Summary of trigger parameters.
         """
-        if 'mcmc_samples' not in dir(self):
+        if 'samples' not in dir(self):
             raise Exception("MCMC posterior sampling has not been performed yet.")
 
         par_names = self.args['t_trig'].get_par_names()+self.args['sp_trig'].get_par_names()
         fig, ax = plt.subplots(1, 1+len(par_names),figsize=(8,4), sharex=False)
         plt.suptitle("Trigger Parameter Posteriors")
-        ax[0].hist(self.mcmc_samples['alpha'])
+        ax[0].hist(self.samples['alpha'])
         ax[0].set_xlabel(r"${\alpha} $")
         for i in range(len(par_names)):
-            ax[i+1].hist(self.mcmc_samples[par_names[i]])
+            ax[i+1].hist(self.samples[par_names[i]])
             ax[i+1].set_xlabel(par_names[i])
 
-        trig_pos = np.stack([self.mcmc_samples[name] for name in ['alpha']+par_names]).T
+        trig_pos = np.stack([self.samples[name] for name in ['alpha']+par_names]).T
         mean = trig_pos.mean(axis=0)
         std = trig_pos.var(axis=0)**0.5
         z_score = np.asarray(mean/std)
@@ -608,7 +608,7 @@ class Hawkes_Model(Point_Process_Model):
         t_units: str
             Time units of original data.
         """
-        if 'mcmc_samples' not in dir(self):
+        if 'samples' not in dir(self):
             raise Exception("MCMC posterior sampling has not been performed yet.")
         if self.args['model'] not in ['hawkes','cox_hawkes']:
             raise Exception("This is not a Hawkes Model. Cannot plot trigger parameters.")
@@ -616,17 +616,17 @@ class Hawkes_Model(Point_Process_Model):
         par_names = self.args['t_trig'].get_par_names()
         post_mean = {}
         for name in par_names:
-            post_mean[name] = self.mcmc_samples[name].mean().item()
+            post_mean[name] = self.samples[name].mean().item()
         scale = 50/self.data['T'].max()
         #estimate a good maximum
         t = self.args['t_trig'].compute_integral(post_mean,self.args['T']/10)
         t = np.log(0.025)/np.log(1-t)*self.args['T']/10
         t = np.arange(0,t,t/250)
         fig, ax = plt.subplots(figsize=(7,7))
-        for i in np.random.choice(np.arange(len(self.mcmc_samples['alpha'])),100):
+        for i in np.random.choice(np.arange(len(self.samples['alpha'])),100):
             pars = {}
             for name in par_names:
-                pars[name] = self.mcmc_samples[name][i].item()
+                pars[name] = self.samples[name][i].item()
             plt.plot(t/scale,self.args['t_trig'].compute_trigger(pars,t),color='black',alpha=0.1)
         fig.suptitle('Time Decay of Trigger Function')
         ax.set_ylabel('Trigger Intensity')
