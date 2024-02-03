@@ -134,9 +134,9 @@ class Point_Process_Model:
         
         if type(A) is gpd.GeoDataFrame:
             # find grid cells overlapping with A
+            comp_grid.crs = A.crs
             args['spatial_grid_cells'] = np.unique(comp_grid.sjoin(A, how='inner')['comp_grid_id'])
             self.A = A
-            comp_grid.set_crs(crs=A.crs)
         else:
             self.A = comp_grid
             args['spatial_grid_cells'] = np.arange(25**2)
@@ -206,14 +206,14 @@ class Point_Process_Model:
             
             #Create Computational Grid GeoDataFrame
             if args['model'] in ['lgcp','cox_hawkes']:
-                comp_grid.crs = spatial_cov.crs
+                self.comp_grid.crs = spatial_cov.crs
                 #find covariate cell intersection with computational grid cells area
-                intersect = gpd.overlay(comp_grid, spatial_cov, how='intersection')
+                intersect = gpd.overlay(self.comp_grid, spatial_cov, how='intersection', keep_geom_type=True)
                 intersect['area'] = intersect.area/((A_[0,1]-A_[0,0])*(A_[1,1]-A_[1,0]))
                 intersect = intersect[intersect['area']>1e-10]
                 args['int_df'] = intersect
                 #find cells on the computational grid that are in the domain
-                args['spatial_grid_cells'] = np.unique(comp_grid.sjoin(spatial_cov, how='inner')['comp_grid_id'])
+                args['spatial_grid_cells'] = np.unique(self.comp_grid.sjoin(spatial_cov, how='inner')['comp_grid_id'])
             else:
                 args['cov_area'] = (spatial_cov.area/((A_[0,1]-A_[0,0])*(A_[1,1]-A_[1,0]))).values
 
