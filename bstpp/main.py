@@ -259,7 +259,7 @@ class Point_Process_Model:
             output = pickle.dump(output,f)
         
     
-    def run_svi(self,num_samples=1000,resume=False,**kwargs):
+    def run_svi(self,num_steps,lr,num_samples=1000,resume=False,**kwargs):
         """
         Perform Stochastic Variational Inference on the model.
         Parameters
@@ -281,10 +281,8 @@ class Point_Process_Model:
         rng_key, rng_key_post, rng_key_pred = random.split(rng_key, 3)
         self.args["num_samples"] = num_samples
         if resume:
-            if 'num_steps' not in kwargs:
-                kwargs['num_steps'] = 10000
-            if 'lr' not in kwargs:
-                kwargs['lr'] = 0.001
+            kwargs['num_steps'] = num_steps
+            kwargs['lr'] = lr
             optimizer = numpyro.optim.Adam(
                 jax.example_libraries.optimizers.inverse_time_decay(kwargs['lr'],kwargs['num_steps'],4)
             )
@@ -293,7 +291,7 @@ class Point_Process_Model:
                                             init_state=self.svi_results.state)
             self.samples = get_samples(rng_key,self.model,self.svi.guide,self.svi_results,self.args)
         else:
-            self.svi,self.svi_results,self.samples=run_SVI(rng_key,self.model,self.args,**kwargs)
+            self.svi,self.svi_results,self.samples=run_SVI(rng_key, self.model, self.args, num_steps, lr, **kwargs)
         loss = np.asarray(self.svi_results.losses)
         plt.plot(np.arange(int(.1*len(loss)),len(loss)),loss[int(.1*len(loss)):])
         plt.xlabel("Iterations")

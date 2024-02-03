@@ -206,7 +206,7 @@ def get_samples(rng_key,model,guide,svi_result,args):
     posterior_samples = predictive(rng_key, args=args)
     return posterior_samples
 
-def run_SVI(rng_key, model, args, num_steps = 10000, lr = 0.001, auto_guide = AutoMultivariateNormal, init_strategy=init_to_median,init_state=None):
+def run_SVI(rng_key, model, args, num_steps, lr, auto_guide = AutoMultivariateNormal, init_strategy=init_to_median,init_state=None):
     start = time.time()
     optimizer = numpyro.optim.Adam(inverse_time_decay(lr,num_steps,4))
     #optimizer = numpyro.optim.Adam(exponential_decay(lr,num_steps,0.01))
