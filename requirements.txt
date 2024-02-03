@@ -8,8 +8,8 @@ fonttools==4.34.4
 geopandas==0.14.0
 h5py==3.7.0
 importlib-resources
-jax==0.4.24
-jaxlib==0.4.24
+jax==0.4.23
+jaxlib==0.4.23
 kiwisolver==1.4.4
 matplotlib==3.5.2
 multipledispatch==0.6.0
