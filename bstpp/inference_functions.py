@@ -191,28 +191,20 @@ def run_mcmc(rng_key, model_mcmc, args):
     print("\nMCMC elapsed time:", time.time() - start)
     return mcmc
 
-def get_samples(rng_key,model,guide,svi_result,args):
-    if args['model'] == 'hawkes':
-        sites = ['alpha','beta','sigmax_2','a_0']
-    elif args['model'] == 'lgcp':
-        sites = ['f_xy','f_t','a_0','z_temporal','z_spatial']
-    elif args['model'] == 'cox_hawkes':
-        sites = ['alpha','beta','sigmax_2','a_0','f_xy','f_t','z_temporal','z_spatial']
-    if 'spatial_cov' in args:
-        sites += ['w','b_0']
+def get_samples(rng_key,model,guide,svi_result,args,sites):
     predictive = Predictive(model, guide=guide, params=svi_result.params, 
                             return_sites = sites,
                             num_samples=args["num_samples"])
     posterior_samples = predictive(rng_key, args=args)
     return posterior_samples
 
-def run_SVI(rng_key, model, args, num_steps, lr, auto_guide = AutoMultivariateNormal, init_strategy=init_to_median,init_state=None):
+def run_SVI(rng_key, model, args, num_steps, lr, sites, auto_guide = AutoMultivariateNormal, init_strategy=init_to_median,init_state=None):
     start = time.time()
     optimizer = numpyro.optim.Adam(inverse_time_decay(lr,num_steps,4))
     #optimizer = numpyro.optim.Adam(exponential_decay(lr,num_steps,0.01))
     guide = auto_guide(model,init_loc_fn=init_strategy)
     svi = SVI(model, guide, optimizer, loss=Trace_ELBO())
     svi_result = svi.run(rng_key, num_steps, args, stable_update=True, init_state=init_state)
-    posterior_samples = get_samples(rng_key,model,guide,svi_result,args)
+    posterior_samples = get_samples(rng_key,model,guide,svi_result,args,sites)
     print("\nSVI elapsed time:", time.time() - start)
     return svi,svi_result,posterior_samples

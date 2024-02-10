@@ -280,6 +280,7 @@ class Point_Process_Model:
         rng_key, rng_key_predict = random.split(random.PRNGKey(10))
         rng_key, rng_key_post, rng_key_pred = random.split(rng_key, 3)
         self.args["num_samples"] = num_samples
+        sites = list(self.get_params().keys())+['loglik']
         if resume:
             kwargs['num_steps'] = num_steps
             kwargs['lr'] = lr
@@ -289,9 +290,9 @@ class Point_Process_Model:
             self.svi.optim = optimizer
             self.svi_results = self.svi.run(rng_key, kwargs['num_steps'], self.args,
                                             init_state=self.svi_results.state)
-            self.samples = get_samples(rng_key,self.model,self.svi.guide,self.svi_results,self.args)
+            self.samples = get_samples(rng_key,self.model,self.svi.guide,self.svi_results,self.args,sites)
         else:
-            self.svi,self.svi_results,self.samples=run_SVI(rng_key, self.model, self.args, num_steps, lr, **kwargs)
+            self.svi,self.svi_results,self.samples=run_SVI(rng_key, self.model, self.args, num_steps, lr, sites, **kwargs)
         loss = np.asarray(self.svi_results.losses)
         plt.plot(np.arange(int(.1*len(loss)),len(loss)),loss[int(.1*len(loss)):])
         plt.xlabel("Iterations")
@@ -380,7 +381,15 @@ class Point_Process_Model:
         )
         return exp_log_density.sum().item()
     
-
+    def expected_AIC(self):
+        """
+        Calculate the expected AIC over the posterior distribution.
+        For $k = $ number of model parameters, expected AIC is defined as,
+        $$E_{\theta|X}[AIC] = \frac{-2}{S}\sum_{s=1}{S}{log(p(X|\theta^s))} + 2k$$
+        """
+        k = sum(self.get_params().values())
+        return -2*self.samples['loglik'].mean().item() + 2*k
+    
     def cov_weight_post_summary(self):
         """
         Plot and summarize posteriors of weights and bias.
@@ -534,7 +543,7 @@ class Hawkes_Model(Point_Process_Model):
         $$\mu(s,t) = exp(a_0 + X(s)w + f_s(s) + f_t(t))$$
 
         where $X(s)$ is the spatial covariate matrix, $f_s$ and $f_t$ are Gaussian Processes. 
-        Both $f_s$ and $f_t$ are simulated by a pretrained VAE. We used a squared exponential kernel with hyperparameters $l \sim InverseGamma(10,1)$ and $\sigma^2 \sim LogNormal(2,0.5)$ 
+        Both $f_s$ and $f_t$ are simulated by a pretrained VAE. We used a squared exponential kernel with hyperparameters $l \sim InverseGamma(15,1)$ and $\sigma^2 \sim LogNormal(2,0.5)$ 
 
         Otherwise, the $\mu$ is given by
 
@@ -565,7 +574,31 @@ class Hawkes_Model(Point_Process_Model):
         super().__init__(data,A,name,**kwargs)
         
         self.args['t_trig'] = temporal_trig(self.args['priors'])
-        self.args['sp_trig'] = spatial_trig(self.args['priors'])        
+        self.args['sp_trig'] = spatial_trig(self.args['priors'])
+    
+    def get_params(self):
+        """
+        Returns
+        -------
+            dict of parameter names as keys and lengths as values
+        """
+        pars = {}
+        pars['alpha'] = 1
+        for n in self.args['t_trig'].get_par_names():
+            pars[n] = 1
+        for n in self.args['sp_trig'].get_par_names():
+            pars[n] = 1
+        
+        if self.args['model'] == 'cox_hawkes':
+            pars['z_spatial'] = self.args['z_dim_spatial']
+            pars['z_temporal'] = self.args['z_dim_temporal']
+            pars['f_xy'] = 0
+            pars['f_t'] = 0
+        pars['a_0'] = 1
+        if 'spatial_cov' in self.args:
+            pars['w'] = self.args['spatial_cov'].shape[1]
+            pars['b_0'] = 0
+        return pars
     
     def plot_trigger_posterior(self):
         """
@@ -608,8 +641,6 @@ class Hawkes_Model(Point_Process_Model):
         """
         if 'samples' not in dir(self):
             raise Exception("MCMC posterior sampling has not been performed yet.")
-        if self.args['model'] not in ['hawkes','cox_hawkes']:
-            raise Exception("This is not a Hawkes Model. Cannot plot trigger parameters.")
         
         par_names = self.args['t_trig'].get_par_names()
         post_mean = {}
@@ -641,7 +672,7 @@ class LGCP_Model(Point_Process_Model):
         $$\lambda(t,s) = exp(a_0 + X(s)w + f_s(s) + f_t(t))$$
 
         where $X(s)$ is the spatial covariate matrix, $f_s$ and $f_t$ are Gaussian Processes. 
-        Both $f_s$ and $f_t$ are simulated by a pretrained VAE. We used a squared exponential kernel with hyperparameters $l \sim InverseGamma(10,1)$ and $\sigma^2 \sim LogNormal(2,0.5)$ 
+        Both $f_s$ and $f_t$ are simulated by a pretrained VAE. We used a squared exponential kernel with hyperparameters $l \sim InverseGamma(15,1)$ and $\sigma^2 \sim LogNormal(2,0.5)$ 
 
         The data is rescaled to fit in a 1x1 spatial grid and a lenght 50 time window. Posterior samples must be interpreted with this in mind.
 
@@ -657,3 +688,20 @@ class LGCP_Model(Point_Process_Model):
         name = 'lgcp'
         self.model = spatiotemporal_LGCP_model
         super().__init__(data,A,name,**kwargs)
+        
+    def get_params(self):
+        """
+        Returns
+        -------
+            dict of parameter names as keys and lengths as values
+        """
+        pars = {}
+        pars['z_spatial'] = self.args['z_dim_spatial']
+        pars['z_temporal'] = self.args['z_dim_temporal']
+        pars['f_xy'] = 0
+        pars['f_t'] = 0
+        pars['a_0'] = 1
+        if 'spatial_cov' in self.args:
+            pars['w'] = self.args['spatial_cov'].shape[1]
+            pars['b_0'] = 0
+        return pars

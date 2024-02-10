@@ -16,7 +16,6 @@ class Trigger(ABC):
         """
         self.prior = prior
 
-    @abstractmethod
     def sample_parameters(self):
         """
         Sample parameters using numpyro
@@ -26,7 +25,8 @@ class Trigger(ABC):
         -------
         dict of a single sample of parameters
         """
-        pass
+        names = self.get_par_names()
+        return dict(zip(names,[numpyro.sample(n,self.prior[n]) for n in names]))
     
     @abstractmethod
     def compute_trigger(self,pars,mat):
@@ -77,13 +77,10 @@ class Trigger(ABC):
 
 class Temporal_Power_Law(Trigger):
     """
-    Power Law Temporal trigger. Lomax distribution.
+    Power Law Temporal trigger. Lomax distribution given by,
+
+    $$f(t;\beta,\gamma) = \beta \gamma ^\beta (\gamma + t)^{-\beta - 1}$$
     """
-    def sample_parameters(self):
-        sample = {}
-        sample['beta'] = numpyro.sample('beta', self.prior['beta'])
-        sample['gamma'] = numpyro.sample('gamma', self.prior['gamma'])
-        return sample
 
     def compute_trigger(self,pars,mat):
         #\beta * \gamma ^ \beta * (\gamma + t) ^ (- \beta - 1)
@@ -97,12 +94,10 @@ class Temporal_Power_Law(Trigger):
 
 class Temporal_Exponential(Trigger):
     """
-    Temporal exponential trigger function.
+    Temporal exponential trigger function given by,
+
+    $$f(t;\beta) = \frac{1}{\beta} e^{-t/\beta}$$
     """
-    def sample_parameters(self):
-        sample = {}
-        sample['beta'] = numpyro.sample('beta', self.prior['beta'])
-        return sample
     
     def compute_trigger(self,pars,mat):
         return jnp.exp(-mat/pars['beta'])/pars['beta']
@@ -116,12 +111,10 @@ class Temporal_Exponential(Trigger):
 
 class Spatial_Symmetric_Gaussian(Trigger):
     """
-    Single parameter symmetric spatial gaussian trigger.
+    Single parameter symmetric spatial gaussian trigger given by,
+
+    $$\varphi(<x,y>;\sigma_x^2) = \frac{1}{2 \pi \sigma_x} exp(-\frac{1}{2\sigma_x^2} (x^2 + y^2))$$
     """
-    def sample_parameters(self):
-        sample = {}
-        sample['sigmax_2'] = numpyro.sample('sigmax_2', self.prior['sigmax_2'])
-        return sample
     
     def compute_trigger(self,pars,mat):
         S_diff_sq=(mat[0]**2)/pars['sigmax_2']+(mat[1]**2)/pars['sigmax_2']
