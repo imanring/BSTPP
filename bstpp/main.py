@@ -492,12 +492,12 @@ class Point_Process_Model:
         
         f_xy_post = self.samples["f_xy"]
         f_xy_post_mean=jnp.mean(f_xy_post, axis=0)
-        self.comp_grid['f_xy_post_mean'] = f_xy_post_mean
+        self.comp_grid['post_mean'] = f_xy_post_mean
         intersect = gpd.overlay(self.comp_grid, self.A[['geometry']], how='intersection',keep_geom_type=True)
         fig, ax = plt.subplots(1,2, figsize=(10, 5))
-        intersect.plot(column='f_xy_post_mean',ax=ax[0])
+        intersect.plot(column='post_mean',ax=ax[0])
         ax[0].set_title('Mean Posterior $f_s$')
-        intersect.plot(column='f_xy_post_mean',ax=ax[1])
+        intersect.plot(column='post_mean',ax=ax[1])
         self.points.plot(ax=ax[1],color='red',marker='x',**kwargs)
         ax[1].set_title('Mean Posterior $f_s$ With Events')
         return fig
@@ -528,7 +528,37 @@ class Point_Process_Model:
         ax[1].set_title('Mean Posterior $X(s)w$ With Events')
         self.points.plot(ax=ax[1],color='red',marker='x',**kwargs)
         ax[1].set_title('Mean Posterior $f_s + X(s)w$ With Events')
-
+    
+    def _sim_spatial(self, geo_df):
+        lam = geo_df['area']*np.exp(geo_df['log_intensity'])
+        num_samp = np.random.poisson(lam)
+        mask_zero = num_samp!=0
+        samples = geo_df[mask_zero].sample_points(size=num_samp[mask_zero])
+        return samples.explode(index_parts=False)
+    
+    def _sim_cox(self):
+        if 'spatial_cov' in self.args:
+            geo_df = self.args['int_df']
+            post_samples = (self.samples['b_0'][:,geo_df['cov_ind'].values] + 
+                            self.samples["f_xy"][:,geo_df['comp_grid_id'].values])
+            geo_df['post_mean'] = post_samples.mean(axis=0)
+        else:
+            geo_df = self.comp_grid
+            geo_df['post_mean'] = self.samples["f_xy"].mean(axis=0)
+            geo_df = geo_df.sjoin(self.A,how='inner')
+            geo_df['area'] = 1/self.args['n_xy']**2
+        f_t = self.samples['f_t'].mean(axis=0)
+        a_0 = self.samples['a_0'].mean()
+        t_lat = np.arange(0,self.args['T'],self.args['T']/self.args['n_t'])
+        sp_samp = list()
+        t_samp = list()
+        for i in range(self.args['T']):
+            geo_df['log_intensity'] = geo_df['post_mean']+a_0+f_t[i]
+            sp_samp.append(self._sim_spatial(geo_df))
+            t_samp.append(np.random.uniform(size=len(sp_samp[-1]))+t_lat[i])
+        sp = np.hstack([(p.x,p.y) for p in sp_samp])
+        bg = np.append(sp.T,np.hstack(t_samp).reshape(-1,1),1)
+        return bg
 
 class Hawkes_Model(Point_Process_Model):
     def __init__(self,data,A,cox_background='cox',temporal_trig=Temporal_Exponential,
@@ -662,7 +692,54 @@ class Hawkes_Model(Point_Process_Model):
         ax.set_xlabel(t_units.capitalize()+' After First Event')
         ax.axhline(0,color='black',linestyle='--')
         ax.axvline(0,color='black',linestyle='--')
+    
+    def _sim_hawkes_bg(self):
+        a_0 = self.samples['a_0'].mean().item()
+        if 'spatial_cov' in self.args:
+            geo_df = self.spatial_cov
+            geo_df['log_intensity'] = a_0 + np.log(self.args['T']) + self.samples['b_0'].mean(axis=0)
+        else:
+            geo_df = self.A
+            geo_df['log_intensity'] = a_0 + np.log(self.args['T'])
+        A_ = self.args['A_']
+        geo_df['area'] = geo_df.area/((A_[0,1]-A_[0,0])*(A_[1,1]-A_[1,0]))
+        sp = self._sim_spatial(geo_df)
+        return np.stack((sp.x,sp.y,np.random.uniform(self.args['T'],size=len(sp)))).T
+    
+    def _sim_offspring(self,bg,par):
+        alpha, b, sigma_2 = par
+        i = 0
+        while i < len(bg):
+            for j in range(np.random.poisson(lam=alpha)):
+                bg = np.concatenate((bg,[bg[i]+[np.random.normal(scale=sigma_2**0.5), 
+                                               np.random.normal(scale=sigma_2**0.5), 
+                                               np.random.exponential(b)]]))
+            i += 1
+        return bg
 
+    def simulate(self):
+        """
+        Simulate data from mean posterior parameters.
+        Currently only works for exponential-gaussian trigger function.
+        Returns
+        -------
+            geopandas DataFrame: ['X','Y','T'] columns
+                simulated data
+        """
+        if self.args['model'] == 'cox_hawkes':
+            bg = self._sim_cox()
+        else:
+            bg = self._sim_hawkes_bg()
+        trig_par = [self.samples[p].mean().item() for p in ['alpha','beta','sigmax_2']]
+        #rescaling spatial argument
+        trig_par[2] *= (self.args['A_'][:,1]-self.args['A_'][:,0]).mean()**2
+        sample = self._sim_offspring(bg,trig_par)
+        #filter out offspring after cutoff
+        sample = sample[sample.T[2]<self.args['T']]
+        geometry = gpd.points_from_xy(sample.T[0], sample.T[1],crs=self.A.crs)
+        points = gpd.GeoDataFrame(data=sample,geometry=geometry,columns=['X','Y','T'])
+        points['T'] = (points['T']*self.points['T'].max()/50)
+        return points
 
 class LGCP_Model(Point_Process_Model):
     def __init__(self,data,A,**kwargs):
@@ -705,3 +782,17 @@ class LGCP_Model(Point_Process_Model):
             pars['w'] = self.args['spatial_cov'].shape[1]
             pars['b_0'] = 0
         return pars
+    
+    def simulate(self):
+        """
+        Simulate data from mean posterior parameters. Requires model inference.
+        Returns
+        -------
+            np.array [n,3]
+                simulated data where n in random
+        """
+        sample = self._sim_cox()
+        geometry = gpd.points_from_xy(sample.T[0], sample.T[1],crs=self.A.crs)
+        points = gpd.GeoDataFrame(data=sample,geometry=geometry,columns=['X','Y','T'])
+        points['T'] = (points['T']*self.points['T'].max()/50)
+        return points
