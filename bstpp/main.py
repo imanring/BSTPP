@@ -536,24 +536,23 @@ class Point_Process_Model:
         samples = geo_df[mask_zero].sample_points(size=num_samp[mask_zero])
         return samples.explode(index_parts=False)
     
-    def _sim_cox(self):
+    def _sim_cox(self,parameters):
         if 'spatial_cov' in self.args:
             geo_df = self.args['int_df']
-            post_samples = (self.samples['b_0'][:,geo_df['cov_ind'].values] + 
-                            self.samples["f_xy"][:,geo_df['comp_grid_id'].values])
-            geo_df['post_mean'] = post_samples.mean(axis=0)
+            geo_df['spatial_log_intensity'] = (parameters['b_0'][geo_df['cov_ind'].values] + 
+                                   parameters['f_xy'][geo_df['comp_grid_id'].values])
         else:
             geo_df = self.comp_grid
-            geo_df['post_mean'] = self.samples["f_xy"].mean(axis=0)
+            geo_df['spatial_log_intensity'] = parameters["f_xy"]
             geo_df = geo_df.sjoin(self.A,how='inner')
             geo_df['area'] = 1/self.args['n_xy']**2
-        f_t = self.samples['f_t'].mean(axis=0)
-        a_0 = self.samples['a_0'].mean()
+        f_t = parameters['f_t']
+        a_0 = parameters['a_0']
         t_lat = np.arange(0,self.args['T'],self.args['T']/self.args['n_t'])
         sp_samp = list()
         t_samp = list()
         for i in range(self.args['T']):
-            geo_df['log_intensity'] = geo_df['post_mean']+a_0+f_t[i]
+            geo_df['log_intensity'] = geo_df['spatial_log_intensity']+a_0+f_t[i]
             sp_samp.append(self._sim_spatial(geo_df))
             t_samp.append(np.random.uniform(size=len(sp_samp[-1]))+t_lat[i])
         sp = np.hstack([(p.x,p.y) for p in sp_samp])
@@ -693,11 +692,11 @@ class Hawkes_Model(Point_Process_Model):
         ax.axhline(0,color='black',linestyle='--')
         ax.axvline(0,color='black',linestyle='--')
     
-    def _sim_hawkes_bg(self):
-        a_0 = self.samples['a_0'].mean().item()
+    def _sim_hawkes_bg(self,parameters):
+        a_0 = parameters['a_0']
         if 'spatial_cov' in self.args:
             geo_df = self.spatial_cov
-            geo_df['log_intensity'] = a_0 + np.log(self.args['T']) + self.samples['b_0'].mean(axis=0)
+            geo_df['log_intensity'] = a_0 + np.log(self.args['T']) + parameters['b_0']
         else:
             geo_df = self.A
             geo_df['log_intensity'] = a_0 + np.log(self.args['T'])
@@ -717,20 +716,29 @@ class Hawkes_Model(Point_Process_Model):
             i += 1
         return bg
 
-    def simulate(self):
+    def simulate(self,parameters=None):
         """
         Simulate data from mean posterior parameters.
         Currently only works for exponential-gaussian trigger function.
+        Parameters
+        ----------
+        parameters: dict
+            set of parameters to simulate from. If parameters is None, use mean of posterior samples.
+            Parameters are expected to be numpy arrays or floats.
         Returns
         -------
             geopandas DataFrame: ['X','Y','T'] columns
                 simulated data
         """
+        if parameters is None:
+            parameters = {k:np.array(v).mean(axis=0) for k,v in self.samples.items()}
+        
         if self.args['model'] == 'cox_hawkes':
-            bg = self._sim_cox()
+            bg = self._sim_cox(parameters)
         else:
-            bg = self._sim_hawkes_bg()
-        trig_par = [self.samples[p].mean().item() for p in ['alpha','beta','sigmax_2']]
+            bg = self._sim_hawkes_bg(parameters)
+        
+        trig_par = [parameters[p] for p in ['alpha','beta','sigmax_2']]
         #rescaling spatial argument
         trig_par[2] *= (self.args['A_'][:,1]-self.args['A_'][:,0]).mean()**2
         sample = self._sim_offspring(bg,trig_par)
@@ -783,15 +791,21 @@ class LGCP_Model(Point_Process_Model):
             pars['b_0'] = 0
         return pars
     
-    def simulate(self):
+    def simulate(self,parameters=None):
         """
         Simulate data from mean posterior parameters. Requires model inference.
+        Parameters
+        ----------
+        parameters: dict
+            set of parameters to simulate from. If parameters is None, use mean of posterior samples.
         Returns
         -------
             np.array [n,3]
                 simulated data where n in random
         """
-        sample = self._sim_cox()
+        if parameters is None:
+            parameters = {k:np.array(v).mean(axis=0) for k,v in self.samples.items()}
+        sample = self._sim_cox(parameters)
         geometry = gpd.points_from_xy(sample.T[0], sample.T[1],crs=self.A.crs)
         points = gpd.GeoDataFrame(data=sample,geometry=geometry,columns=['X','Y','T'])
         points['T'] = (points['T']*self.points['T'].max()/50)
