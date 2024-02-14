@@ -1,6 +1,8 @@
 from abc import ABC, abstractmethod 
 import numpyro
+from scipy.stats import lomax
 import jax.numpy as jnp
+import numpy as np
 import jax
 
 
@@ -12,7 +14,7 @@ class Trigger(ABC):
         Parameters
         ----------
         prior: dict of numpyro distributions
-            Used to sample parameters for 
+            Used to sample parameters for trigger
         """
         self.prior = prior
 
@@ -26,7 +28,22 @@ class Trigger(ABC):
         dict of a single sample of parameters
         """
         names = self.get_par_names()
-        return dict(zip(names,[numpyro.sample(n,self.prior[n]) for n in names]))
+        return {n:numpyro.sample(n,self.prior[n]) for n in names}
+    
+    @abstractmethod
+    def simulate_trigger(self,pars):
+        """
+        Simulate a point from the trigger function (assuming the trigger is a pdf). Optional. Only necessay for data simulation.
+        Parameters
+        ----------
+        pars: dict
+            parameters for the trigger to generate point.
+        Returns
+        -------
+            spatial triggers - np.array [2]
+            temporal triggers - float
+        """
+        pass
     
     @abstractmethod
     def compute_trigger(self,pars,mat):
@@ -81,6 +98,8 @@ class Temporal_Power_Law(Trigger):
 
     $$f(t;\beta,\gamma) = \beta \gamma ^\beta (\gamma + t)^{-\beta - 1}$$
     """
+    def simulate_trigger(self,pars):
+        return lomax.rvs(pars['beta'])*pars['gamma']
 
     def compute_trigger(self,pars,mat):
         #\beta * \gamma ^ \beta * (\gamma + t) ^ (- \beta - 1)
@@ -92,12 +111,17 @@ class Temporal_Power_Law(Trigger):
     def get_par_names(self):
         return ['beta','gamma']
 
+    
+
 class Temporal_Exponential(Trigger):
     """
     Temporal exponential trigger function given by,
 
     $$f(t;\beta) = \frac{1}{\beta} e^{-t/\beta}$$
     """
+    
+    def simulate_trigger(self, pars):
+        return np.random.exponential(pars['beta'])
     
     def compute_trigger(self,pars,mat):
         return jnp.exp(-mat/pars['beta'])/pars['beta']
@@ -115,6 +139,9 @@ class Spatial_Symmetric_Gaussian(Trigger):
 
     $$\varphi(<x,y>;\sigma_x^2) = \frac{1}{2 \pi \sigma_x} exp(-\frac{1}{2\sigma_x^2} (x^2 + y^2))$$
     """
+
+    def simulate_trigger(self, pars):
+        return np.random.normal(scale=pars['sigmax_2']**0.5,size=2)
     
     def compute_trigger(self,pars,mat):
         S_diff_sq=(mat[0]**2)/pars['sigmax_2']+(mat[1]**2)/pars['sigmax_2']

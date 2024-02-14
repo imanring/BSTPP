@@ -63,7 +63,7 @@ def load_Chicago_Shootings():
 
 
 class Point_Process_Model:
-    def __init__(self,data,A,model,spatial_cov=None,cov_names=None,
+    def __init__(self,model,data,A,T,spatial_cov=None,cov_names=None,
                  cov_grid_size=None,standardize_cov=True,**priors):
         """
         Spatiotemporal Point Process Model.
@@ -71,12 +71,14 @@ class Point_Process_Model:
 
         Parameters
         ----------
+        model: str
+            one of ['cox_hawkes','lgcp','hawkes'].
         data: str or pd.DataFrame
             either file path or DataFrame containing spatiotemporal data. Columns must include 'X', 'Y', 'T'.
         A: np.array [2x2], GeoDataFram
             Spatial region of interest. If np.array first row is the x-range, second row is y-range.
-        model: str
-            one of ['cox_hawkes','lgcp','hawkes'].
+        T: float
+            Maximum time in region of interest. Time is assumed to spart at 0.
         spatial_cov: str,pd.DataFrame,gpd.GeoDataFrame
             Either file path (.csv or .shp), DataFrame, or GeoDataFrame containing spatial covariates. 
             Spatial covariates must cover all the points in data.
@@ -116,8 +118,7 @@ class Point_Process_Model:
         
         #create computational grid
         n_t=50
-        T=50
-        x_t = jnp.arange(0, T, T/n_t)
+        x_t = jnp.arange(0, args['T'], args['T']/n_t)
         args["n_t"]=n_t
         args["x_t"]=x_t
         
@@ -142,10 +143,10 @@ class Point_Process_Model:
             args['spatial_grid_cells'] = np.arange(25**2)
         
         self.comp_grid = comp_grid
+        self.T = T
         
         args,points = self._scale_xyt(data,args,comp_grid)
         self.points = points
-        args["T"]=T
         
         if args['model'] in ['lgcp','cox_hawkes']:
             args["gp_kernel"]=exp_sq_kernel 
@@ -227,7 +228,10 @@ class Point_Process_Model:
             default_priors["w"] = dist.Normal(jnp.zeros(args['num_cov']),jnp.ones(args["num_cov"]))
         args['sp_var_mu'] = 2.0
         for par, prior in priors.items():
-            default_priors[par] = prior
+            if isinstance(prior,dist.Distribution):
+                default_priors[par] = prior
+            else:
+                raise Exception(f"Unknown argument {par}. Prior distributions must be instances of numpyro Distribution.")
         args['priors'] = default_priors
         self.args = args
 
@@ -241,7 +245,10 @@ class Point_Process_Model:
         """
         with open(file_name, 'rb') as f:
             output = pickle.load(f)
-        self.mcmc = output['mcmc']
+        if 'svi_results' in output:
+            self.svi_results = output['svi_results']
+        if 'mcmc' in output:
+            self.mcmc = output['mcmc']
         self.samples = output['samples']
 
     def save_rslts(self,file_name):
@@ -253,7 +260,10 @@ class Point_Process_Model:
             File where to save results
         """
         output = dict()
-        output['mcmc'] = self.mcmc
+        if 'svi_results' in dir(self):
+            output['svi_results'] = self.svi_results
+        if 'mcmc' in dir(self):
+            output['mcmc'] = self.mcmc
         output['samples'] = self.samples
         with open(file_name, 'wb') as f:
             output = pickle.dump(output,f)
@@ -328,9 +338,7 @@ class Point_Process_Model:
 
     def _scale_xyt(self,data,args,comp_grid):
         #scale temporal events
-        t_events_total=((data['T']-data['T'].min())).to_numpy()
-        t_events_total/=t_events_total.max()
-        t_events_total*=50
+        t_events_total=data['T'].values/self.T*50
         args["t_events"]=t_events_total
         args['indices_t']=np.searchsorted(args['x_t'], t_events_total, side='right')-1
         
@@ -441,7 +449,7 @@ class Point_Process_Model:
         
         b_scale = 1.
         if rescale:
-            b_scale = 50/self.data['T'].max()
+            b_scale = 50/self.T
         x_t = jnp.arange(0, self.args['T'], self.args['T']/self.args["n_t"])/b_scale
         f_t_post=self.samples["f_t"]
         f_t_hpdi = hpdi(self.samples["f_t"])
@@ -560,7 +568,7 @@ class Point_Process_Model:
         return bg
 
 class Hawkes_Model(Point_Process_Model):
-    def __init__(self,data,A,cox_background='cox',temporal_trig=Temporal_Exponential,
+    def __init__(self,data, A, T, cox_background='cox',temporal_trig=Temporal_Exponential,
                  spatial_trig=Spatial_Symmetric_Gaussian,**kwargs):
         """
         Spatiotemporal Point Process Model given by,
@@ -586,6 +594,8 @@ class Hawkes_Model(Point_Process_Model):
             either file path or DataFrame containing spatiotemporal data. Columns must include 'X', 'Y', 'T'.
         A: np.array [2x2], GeoDataFram
             Spatial region of interest. If np.array first row is the x-range, second row is y-range.
+        T: float
+            Maximum time in region of interest. Time is assumed to spart at 0.
         cox_background: bool
             use gaussian processes in background
         temporal_trig: class Trigger
@@ -600,7 +610,7 @@ class Hawkes_Model(Point_Process_Model):
             name = 'cox_hawkes'
         else:
             name = 'hawkes'
-        super().__init__(data,A,name,**kwargs)
+        super().__init__(name, data, A, T, **kwargs)
         
         self.args['t_trig'] = temporal_trig(self.args['priors'])
         self.args['sp_trig'] = spatial_trig(self.args['priors'])
@@ -675,7 +685,7 @@ class Hawkes_Model(Point_Process_Model):
         post_mean = {}
         for name in par_names:
             post_mean[name] = self.samples[name].mean().item()
-        scale = 50/self.data['T'].max()
+        scale = 50/self.T
         #estimate a good maximum
         t = self.args['t_trig'].compute_integral(post_mean,self.args['T']/10)
         t = np.log(0.025)/np.log(1-t)*self.args['T']/10
@@ -706,25 +716,24 @@ class Hawkes_Model(Point_Process_Model):
         return np.stack((sp.x,sp.y,np.random.uniform(self.args['T'],size=len(sp)))).T
     
     def _sim_offspring(self,bg,par):
-        alpha, b, sigma_2 = par
         i = 0
         while i < len(bg):
-            for j in range(np.random.poisson(lam=alpha)):
-                bg = np.concatenate((bg,[bg[i]+[np.random.normal(scale=sigma_2**0.5), 
-                                               np.random.normal(scale=sigma_2**0.5), 
-                                               np.random.exponential(b)]]))
+            for j in range(np.random.poisson(lam=par['alpha'])):
+                #simulate trigger and rescale
+                sp_dif = (self.args['A_'][:,1]-self.args['A_'][:,0])*\
+                            self.args['sp_trig'].simulate_trigger(par)
+                t_dif = [self.args['t_trig'].simulate_trigger(par)]
+                bg = np.concatenate((bg,[bg[i]+np.append(sp_dif,t_dif)]))
             i += 1
         return bg
 
     def simulate(self,parameters=None):
         """
         Simulate data from mean posterior parameters.
-        Currently only works for exponential-gaussian trigger function.
         Parameters
         ----------
         parameters: dict
-            set of parameters to simulate from. If parameters is None, use mean of posterior samples.
-            Parameters are expected to be numpy arrays or floats.
+            Parameters to simulate from. If parameters is None, use mean of posterior samples. keys are string parameter names. values are np.array or float. Names must be same as those that appear in the sample from the model.
         Returns
         -------
             geopandas DataFrame: ['X','Y','T'] columns
@@ -737,20 +746,16 @@ class Hawkes_Model(Point_Process_Model):
             bg = self._sim_cox(parameters)
         else:
             bg = self._sim_hawkes_bg(parameters)
-        
-        trig_par = [parameters[p] for p in ['alpha','beta','sigmax_2']]
-        #rescaling spatial argument
-        trig_par[2] *= (self.args['A_'][:,1]-self.args['A_'][:,0]).mean()**2
-        sample = self._sim_offspring(bg,trig_par)
+        sample = self._sim_offspring(bg,parameters)
         #filter out offspring after cutoff
         sample = sample[sample.T[2]<self.args['T']]
         geometry = gpd.points_from_xy(sample.T[0], sample.T[1],crs=self.A.crs)
         points = gpd.GeoDataFrame(data=sample,geometry=geometry,columns=['X','Y','T'])
-        points['T'] = (points['T']*self.points['T'].max()/50)
+        points['T'] = (points['T']*self.T/self.args['T'])
         return points
 
 class LGCP_Model(Point_Process_Model):
-    def __init__(self,data,A,**kwargs):
+    def __init__(self,*args,**kwargs):
         """
         Spatiotemporal LGCP Model given by,
         
@@ -763,16 +768,14 @@ class LGCP_Model(Point_Process_Model):
 
         Parameters
         ----------
-        data: str or pd.DataFrame
-            either file path or DataFrame containing spatiotemporal data. Columns must include 'X', 'Y', 'T'.
-        A: np.array [2x2], GeoDataFram
-            Spatial region of interest. If np.array first row is the x-range, second row is y-range.
+        args: list
+            Parameters from Point_Process_Model
         kwargs: dict
             Parameters from Point_Process_Model
         """
         name = 'lgcp'
         self.model = spatiotemporal_LGCP_model
-        super().__init__(data,A,name,**kwargs)
+        super().__init__(name,*args,**kwargs)
         
     def get_params(self):
         """
@@ -797,16 +800,16 @@ class LGCP_Model(Point_Process_Model):
         Parameters
         ----------
         parameters: dict
-            set of parameters to simulate from. If parameters is None, use mean of posterior samples.
+            Parameters to simulate from. If parameters is None, use mean of posterior samples. keys are string parameter names. values are np.array or float. Names must be same as those that appear in the sample from the model.
         Returns
         -------
-            np.array [n,3]
-                simulated data where n in random
+            geopandas DataFrame: ['X','Y','T'] columns
+                simulated data
         """
         if parameters is None:
             parameters = {k:np.array(v).mean(axis=0) for k,v in self.samples.items()}
         sample = self._sim_cox(parameters)
         geometry = gpd.points_from_xy(sample.T[0], sample.T[1],crs=self.A.crs)
         points = gpd.GeoDataFrame(data=sample,geometry=geometry,columns=['X','Y','T'])
-        points['T'] = (points['T']*self.points['T'].max()/50)
+        points['T'] = (points['T']*self.T/self.args['T'])
         return points
