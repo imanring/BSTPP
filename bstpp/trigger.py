@@ -93,11 +93,16 @@ class Trigger(ABC):
         pass
 
 class Temporal_Power_Law(Trigger):
-    """
-    Power Law Temporal trigger. Lomax distribution given by,
 
-    $$f(t;\beta,\gamma) = \beta \gamma ^\beta (\gamma + t)^{-\beta - 1}$$
-    """
+    def __init__(self,prior):
+        r"""
+        Power Law Temporal trigger. Lomax distribution given by,
+    
+        $$f(t;\beta,\gamma) = \beta \gamma^\beta (\gamma + t)^{-\beta - 1}$$
+
+        """
+        super().__init(prior)
+    
     def simulate_trigger(self,pars):
         return lomax.rvs(pars['beta'])*pars['gamma']
 
@@ -114,10 +119,11 @@ class Temporal_Power_Law(Trigger):
     
 
 class Temporal_Exponential(Trigger):
-    """
+    r"""
     Temporal exponential trigger function given by,
 
     $$f(t;\beta) = \frac{1}{\beta} e^{-t/\beta}$$
+    
     """
     
     def simulate_trigger(self, pars):
@@ -134,10 +140,11 @@ class Temporal_Exponential(Trigger):
 
 
 class Spatial_Symmetric_Gaussian(Trigger):
-    """
+    r"""
     Single parameter symmetric spatial gaussian trigger given by,
 
     $$\varphi(<x,y>;\sigma_x^2) = \frac{1}{2 \pi \sigma_x} exp(-\frac{1}{2\sigma_x^2} (x^2 + y^2))$$
+    
     """
 
     def simulate_trigger(self, pars):

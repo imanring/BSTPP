@@ -183,7 +183,3 @@ def sq_diff(a,b):
 
 def square_mean(a,b):
   return np.mean((a-b)**2)
-
-
-
-

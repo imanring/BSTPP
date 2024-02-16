@@ -390,7 +390,7 @@ class Point_Process_Model:
         return exp_log_density.sum().item()
     
     def expected_AIC(self):
-        """
+        r"""
         Calculate the expected AIC over the posterior distribution.
         For $k = $ number of model parameters, expected AIC is defined as,
         $$E_{\theta|X}[AIC] = \frac{-2}{S}\sum_{s=1}{S}{log(p(X|\theta^s))} + 2k$$
@@ -570,10 +570,10 @@ class Point_Process_Model:
 class Hawkes_Model(Point_Process_Model):
     def __init__(self,data, A, T, cox_background='cox',temporal_trig=Temporal_Exponential,
                  spatial_trig=Spatial_Symmetric_Gaussian,**kwargs):
-        """
+        r"""
         Spatiotemporal Point Process Model given by,
         
-        $$\lambda(t,s) = \mu(s,t) + \sum_{i:t_i<t}{\\alpha f(t-t_i;\\beta) \\varphi(s-s_i;\\sigma^2)}$$
+        $$\lambda(t,s) = \mu(s,t) + \sum_{i:t_i<t}{\alpha f(t-t_i;\beta) \varphi(s-s_i;\sigma^2)}$$
 
         where $f$ is defined by spatial_trig, $\\varphi$ is defined by spatial_trig. If cox_background is true, $\mu$ is given by
         
@@ -756,7 +756,7 @@ class Hawkes_Model(Point_Process_Model):
 
 class LGCP_Model(Point_Process_Model):
     def __init__(self,*args,**kwargs):
-        """
+        r"""
         Spatiotemporal LGCP Model given by,
         
         $$\lambda(t,s) = exp(a_0 + X(s)w + f_s(s) + f_t(t))$$
