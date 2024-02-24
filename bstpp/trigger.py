@@ -9,7 +9,12 @@ import jax
 class Trigger(ABC):
     def __init__(self,prior):
         """
-        Abstract Trigger class to be extented for Hawkes models.
+        Abstract Trigger class to be extented for Hawkes models. The trigger is assumed to be a pdf and the reproduction rate is coded separately. The required methods to implement are:
+        - `compute_trigger`: compute the trigger function (pdf)
+        - `compute_integral`: compute the integral of the trigger function given limits (cdf)
+        - `get_par_names`: returns a list of the parameter names used in the trigger function
+        
+        `simulate_trigger` is used only if a user wishes to simulate from the trigger function.
         
         Parameters
         ----------
@@ -48,7 +53,7 @@ class Trigger(ABC):
     @abstractmethod
     def compute_trigger(self,pars,mat):
         """
-        Compute the trigger function
+        Compute the trigger function. Computes the trigger function for the [n,n] difference matrix of points.
         Parameters
         ----------
         pars: dict
@@ -60,23 +65,23 @@ class Trigger(ABC):
                  spatiotemporal triggers - [3, n, n]
         Returns
         -------
-        jax numpy matrix [n,n]
+        jax numpy matrix [n,n]. Trigger function computed for each entry in the matrix
         """
         pass
     
     @abstractmethod
-    def compute_integral(self,pars,dif):
+    def compute_integral(self,pars,limits):
         """
-        Compute the integral of the trigger function
+        Compute the integral of the trigger function from the given limits. For temporal triggers, the integral is computed from 0 to the upper bound. For spatial triggers, the integral is over the rectangle defined by [[x_max,x_min],[y_max,y_min]]
         Parameters
         -----------
         pars: dict
             results from sample_parameters
-        dif: jax numpy matrix
+        limits: jax numpy matrix
             limits of integration with shape
-                temporal - [n]
-                spatial - [2, 2, n]
-                spatiotemporal - ([n], [2, 2, n])
+                temporal - [n] compute integal from 0 to limit
+                spatial - [2, 2, n] compute integral over rectangle defined by [[x_max,x_min],[y_max,y_min]]
+                spatiotemporal - ([n], [2, 2, n]) combination of temporal limits and spatial limits
         Returns
         -------
         jax numpy [n]
@@ -86,6 +91,8 @@ class Trigger(ABC):
     @abstractmethod
     def get_par_names(self):
         """
+        Get list of parameter names. Parameter names may not overlap with any other parameter in the model.
+        Excluded names include ['alpha','a_0','b_0','f_xy','v_xy','f_t','v_t','w','mu_xyt','rate_t','z_spatial','z_temporal','rate_xy']. Each parameter named here must have a prior with the same name specified in the model.
         Returns
         -------
         list of names of parameters
@@ -101,7 +108,7 @@ class Temporal_Power_Law(Trigger):
         $$f(t;\beta,\gamma) = \beta \gamma^\beta (\gamma + t)^{-\beta - 1}$$
 
         """
-        super().__init(prior)
+        super().__init__(prior)
     
     def simulate_trigger(self,pars):
         return lomax.rvs(pars['beta'])*pars['gamma']

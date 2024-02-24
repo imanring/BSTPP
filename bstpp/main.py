@@ -23,7 +23,7 @@ from numpyro.infer import log_likelihood
 from .utils import * 
 from .inference_functions import *
 from .trigger import *
-
+from .vae_functions import *
 
 
 def load_Boko_Haram():
@@ -219,11 +219,7 @@ class Point_Process_Model:
                 args['cov_area'] = (spatial_cov.area/((A_[0,1]-A_[0,0])*(A_[1,1]-A_[1,0]))).values
 
         #Set up parameter priors
-        default_priors = {"a_0": dist.Normal(0,3),
-                          "alpha": dist.Beta(1,1),
-                          "beta": dist.HalfNormal(4.0),
-                          "sigmax_2": dist.HalfNormal(0.25),
-                         }
+        default_priors = {}
         if 'num_cov' in args:
             default_priors["w"] = dist.Normal(jnp.zeros(args['num_cov']),jnp.ones(args["num_cov"]))
         args['sp_var_mu'] = 2.0
@@ -269,7 +265,7 @@ class Point_Process_Model:
             output = pickle.dump(output,f)
         
     
-    def run_svi(self,num_steps,lr,num_samples=1000,resume=False,**kwargs):
+    def run_svi(self,num_steps,lr,num_samples=1000,resume=False,plot_loss=True,**kwargs):
         """
         Perform Stochastic Variational Inference on the model.
         Parameters
@@ -282,6 +278,8 @@ class Point_Process_Model:
             learning rate for SVI
         num_steps: int, default=10000
             Number of interations for SVI to run.
+        plot_loss: bool
+            
         auto_guide: numpyro AutoGuide, default=AutoMultivariateNormal
             See numpyro AutoGuides for details.
         init_strategy: function, default=init_to_median
@@ -741,6 +739,18 @@ class Hawkes_Model(Point_Process_Model):
         """
         if parameters is None:
             parameters = {k:np.array(v).mean(axis=0) for k,v in self.samples.items()}
+        if 'f_t' not in parameters and 'z_temporal' in parameters:
+            decoder_nn_temporal = vae_decoder_temporal(self.args["hidden_dim_temporal"], self.args["n_t"])  
+            # Approximate Gaussian Process with VAE
+            v_t = decoder_nn_temporal[1](self.args["decoder_params_temporal"], parameters['z_temporal'])
+            parameters['f_t'] = v_t[0:self.args["n_t"]]
+        if 'f_xy' not in parameters and 'z_spatial' in parameters:
+            decoder_nn = vae_decoder_spatial(self.args["hidden_dim2_spatial"], self.args["hidden_dim1_spatial"], self.args["n_xy"])  
+            decoder_params = self.args["decoder_params_spatial"]
+            # Generate Gaussian Process from VAE
+            parameters['f_xy'] = jnp.exp(self.args['sp_var_mu']) * decoder_nn[1](decoder_params, parameters['z_spatial'])
+        if 'w' in parameters and 'b_0' not in parameters:
+            parameters['b_0'] = self.args['spatial_cov'] @ parameters['w']
         
         if self.args['model'] == 'cox_hawkes':
             bg = self._sim_cox(parameters)
@@ -751,8 +761,10 @@ class Hawkes_Model(Point_Process_Model):
         sample = sample[sample.T[2]<self.args['T']]
         geometry = gpd.points_from_xy(sample.T[0], sample.T[1],crs=self.A.crs)
         points = gpd.GeoDataFrame(data=sample,geometry=geometry,columns=['X','Y','T'])
+        #filter to time window
         points['T'] = (points['T']*self.T/self.args['T'])
-        return points
+        #filter to spatial window
+        return points.sjoin(self.A[['geometry']])[['X','Y','T','geometry']]
 
 class LGCP_Model(Point_Process_Model):
     def __init__(self,*args,**kwargs):
