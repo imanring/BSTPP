@@ -10,8 +10,11 @@ class Trigger(ABC):
     def __init__(self,prior):
         """
         Abstract Trigger class to be extented for Hawkes models. The trigger is assumed to be a pdf and the reproduction rate is coded separately. The required methods to implement are:
+        
         - `compute_trigger`: compute the trigger function (pdf)
+        
         - `compute_integral`: compute the integral of the trigger function given limits (cdf)
+        
         - `get_par_names`: returns a list of the parameter names used in the trigger function
         
         `simulate_trigger` is used only if a user wishes to simulate from the trigger function.
@@ -150,7 +153,7 @@ class Spatial_Symmetric_Gaussian(Trigger):
     r"""
     Single parameter symmetric spatial gaussian trigger given by,
 
-    $$\varphi(<x,y>;\sigma_x^2) = \frac{1}{2 \pi \sigma_x} exp(-\frac{1}{2\sigma_x^2} (x^2 + y^2))$$
+    $$\varphi(\mathbf{x};\sigma_x^2) = \frac{1}{2 \pi \sigma_x} exp(-\frac{1}{2\sigma_x^2} \mathbf{x} \cdot \mathbf{x})$$
     
     """
 

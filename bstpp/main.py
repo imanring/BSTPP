@@ -302,7 +302,7 @@ class Point_Process_Model:
         else:
             self.svi,self.svi_results,self.samples=run_SVI(rng_key, self.model, self.args, num_steps, lr, sites, **kwargs)
         loss = np.asarray(self.svi_results.losses)
-        plt.plot(np.arange(int(.1*len(loss)),len(loss)),loss[int(.1*len(loss)):])
+        plt.plot(np.arange(int(.01*len(loss)),len(loss)),loss[int(.01*len(loss)):])
         plt.xlabel("Iterations")
         plt.ylabel("Loss")
         plt.show()
@@ -366,7 +366,7 @@ class Point_Process_Model:
     def log_expected_likelihood(self,data):
         """
         Computes the log expected likelihood for test data.
-        
+        $$E_{\theta|X}[\ell] = log(\frac{1}{S}\sum_{s=1}{S}{p(X|\theta^s)})$$
         Parameters
         ----------
         data: pd.DataFrame or str
@@ -589,7 +589,7 @@ class Hawkes_Model(Point_Process_Model):
         Parameters
         ----------
         data: str or pd.DataFrame
-            either file path or DataFrame containing spatiotemporal data. Columns must include 'X', 'Y', 'T'.
+            either file path or DataFrame containing spatiotemporal data. Columns must include 'X', 'Y', 'T'. The file must be sorted by 'T'.
         A: np.array [2x2], GeoDataFram
             Spatial region of interest. If np.array first row is the x-range, second row is y-range.
         T: float
