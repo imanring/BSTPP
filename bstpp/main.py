@@ -288,7 +288,7 @@ class Point_Process_Model:
         rng_key, rng_key_predict = random.split(random.PRNGKey(10))
         rng_key, rng_key_post, rng_key_pred = random.split(rng_key, 3)
         self.args["num_samples"] = num_samples
-        sites = list(self.get_params().keys())+['loglik']
+        sites = list(self.get_params().keys())+['loglik','Itot_excite','Itot_txy']
         if resume:
             kwargs['num_steps'] = num_steps
             kwargs['lr'] = lr
@@ -395,6 +395,7 @@ class Point_Process_Model:
         """
         k = sum(self.get_params().values())
         return -2*self.samples['loglik'].mean().item() + 2*k
+
     
     def cov_weight_post_summary(self):
         """
@@ -424,10 +425,10 @@ class Point_Process_Model:
         w_samps = np.concatenate((self.samples['w'],self.samples['a_0'].reshape(-1,1)),axis=1)
         mean = w_samps.mean(axis=0)
         std = w_samps.var(axis=0)**0.5
-        z_score = np.asarray(mean/std)
-        p_val = 1-np.vectorize(erf)(abs(z_score)/2**0.5)
+        #z_score = np.asarray(mean/std)
+        p = (w_samps>0).mean(axis=0)
         quantiles = np.quantile(w_samps,[0.025,0.975],axis=0)
-        w_summary = pd.DataFrame({'Post Mean':mean,'Post Std':std,'z':z_score,'P>|z|':p_val,
+        w_summary = pd.DataFrame({'Post Mean':mean,'Post Std':std,'P(w>0)':p,
                       '[0.025':quantiles[0],'0.975]':quantiles[1]},index=self.cov_names+['a_0'])
         return w_summary
     
@@ -637,33 +638,56 @@ class Hawkes_Model(Point_Process_Model):
             pars['b_0'] = 0
         return pars
     
-    def plot_trigger_posterior(self):
+    def plot_prop_excitation(self):
+        """
+        Plots a histogram of the posterior distribution of the proportion of the intensity due to self-excitation.
+        
+        Returns
+        -------
+            float: posterior mean of proportion of intensity due to self-excitation
+        """
+        p = self.samples['Itot_excite']/self.samples['Itot_txy']
+        plt.hist(p,density=True)
+        plt.title("Proportion of Intensity Due to Self-Excitation")
+        plt.xlabel("Proportion of Intensity Due to Self-Excitation")
+        return p.mean().item()
+    
+    def plot_trigger_posterior(self,trace=False):
         """
         Plot histograms of posterior trigger parameters.
         Returns
         -------
         pd.DataFrame
             Summary of trigger parameters.
+        trace: bool
+            plot trace or histogram of parameters
         """
         if 'samples' not in dir(self):
             raise Exception("MCMC posterior sampling has not been performed yet.")
-
         par_names = self.args['t_trig'].get_par_names()+self.args['sp_trig'].get_par_names()
-        fig, ax = plt.subplots(1, 1+len(par_names),figsize=(8,4), sharex=False)
-        plt.suptitle("Trigger Parameter Posteriors")
-        ax[0].hist(self.samples['alpha'])
-        ax[0].set_xlabel(r"${\alpha} $")
-        for i in range(len(par_names)):
-            ax[i+1].hist(self.samples[par_names[i]])
-            ax[i+1].set_xlabel(par_names[i])
+        if trace:
+            fig, ax = plt.subplots(1+len(par_names),1,figsize=(5,8), sharex=True)
+            plt.suptitle("Trace Plots for Trigger Parameter Posteriors")
+            ax[0].plot(self.samples['alpha'])
+            ax[0].set_ylabel(r"${\alpha} $")
+            for i in range(len(par_names)):
+                ax[i+1].plot(self.samples[par_names[i]])
+                ax[i+1].set_ylabel(par_names[i])
+        else:
+            fig, ax = plt.subplots(1, 1+len(par_names),figsize=(8,4), sharex=False)
+            plt.suptitle("Trigger Parameter Posteriors")
+            ax[0].hist(self.samples['alpha'])
+            ax[0].set_xlabel(r"${\alpha} $")
+            for i in range(len(par_names)):
+                ax[i+1].hist(self.samples[par_names[i]])
+                ax[i+1].set_xlabel(par_names[i])
 
         trig_pos = np.stack([self.samples[name] for name in ['alpha']+par_names]).T
         mean = trig_pos.mean(axis=0)
         std = trig_pos.var(axis=0)**0.5
-        z_score = np.asarray(mean/std)
-        p_val = 1-np.vectorize(erf)(abs(z_score)/2**0.5)
+        p_val = [(self.samples[name]>0).mean() for name in ['alpha']+par_names]
         quantiles = np.quantile(trig_pos,[0.025,0.975],axis=0)
-        trig_summary = pd.DataFrame({'Post Mean':mean,'Post Std':std,'z':z_score,'P>|z|':p_val,
+        trig_summary = pd.DataFrame({'Post Mean':mean,'Post Std':std,r'P(w>0)':p_val,
                       '[0.025':quantiles[0],'0.975]':quantiles[1]},index=['alpha']+par_names)
         return trig_summary
     

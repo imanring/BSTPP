@@ -113,10 +113,10 @@ def spatiotemporal_hawkes_model(args):
                          ).reshape(2,2,-1)
     
     sp_part = args['sp_trig'].compute_integral(sp_pars,sp_limits)
-
+    
+    Itot_excite = numpyro.deterministic("Itot_excite",jnp.sum(temp_part*sp_part))
     ## total integral
-    Itot_txy=jnp.sum(temp_part*sp_part)+Itot_txy_back
-    numpyro.deterministic("Itot_txy",Itot_txy)
+    Itot_txy = numpyro.deterministic("Itot_txy",Itot_excite+Itot_txy_back)
     loglik=numpyro.deterministic('loglik',ell_1-Itot_txy)
 
     numpyro.factor("t_events", loglik) 
