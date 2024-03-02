@@ -397,13 +397,15 @@ class Point_Process_Model:
         return -2*self.samples['loglik'].mean().item() + 2*k
 
     
-    def cov_weight_post_summary(self):
+    def cov_weight_post_summary(self,trace=False):
         """
         Plot and summarize posteriors of weights and bias.
         Returns
         -------
         pd.DataFrame
             summary of weights and bias
+        trace: bool
+            plot trace or histogram of posteriors
         """
         if 'samples' not in dir(self):
             raise Exception("MCMC posterior sampling has not been performed yet.")
@@ -411,21 +413,35 @@ class Point_Process_Model:
             raise Exception("Spatial covariates were not included in the model.")
         
         n = self.samples['w'].shape[1]+1
-        c = ceil(n**0.5)
-        r = ceil(n/c)
+        
+        if trace:
+            r = ceil(n**0.75)
+            c = ceil(n/r)
+        else:
+            c = ceil(n**0.5)
+            r = ceil(n/c)
         fig, ax = plt.subplots(r,c,figsize=(10,10), sharex=False)
         fig.suptitle('Covariate Weights', fontsize=16)
         for i in range(n-1):
-            ax[i//c,i%c].hist(self.samples['w'].T[i])
-            ax[i//c,i%c].set_xlabel(self.cov_names[i])
-        ax[(n-1)//c,(n-1)%c].hist(self.samples['a_0'])
-        ax[(n-1)//c,(n-1)%c].set_xlabel("$a_0$")
-
+            if trace:
+                ax[i//c,i%c].plot(self.samples['w'].T[i])
+                ax[i//c,i%c].set_ylabel(self.cov_names[i])
+            else:
+                ax[i//c,i%c].hist(self.samples['w'].T[i])
+                ax[i//c,i%c].set_xlabel(self.cov_names[i])
+        if trace:
+            ax[(n-1)//c,(n-1)%c].plot(self.samples['a_0'])
+            ax[(n-1)//c,(n-1)%c].set_ylabel("$a_0$")
+        else:
+            ax[(n-1)//c,(n-1)%c].hist(self.samples['a_0'])
+            ax[(n-1)//c,(n-1)%c].set_xlabel("$a_0$")
+        #clear unused parts of the grid
+        for i in range(n,r*c):
+            ax[i//c, i%c].axis('off')
         
         w_samps = np.concatenate((self.samples['w'],self.samples['a_0'].reshape(-1,1)),axis=1)
         mean = w_samps.mean(axis=0)
         std = w_samps.var(axis=0)**0.5
-        #z_score = np.asarray(mean/std)
         p = (w_samps>0).mean(axis=0)
         quantiles = np.quantile(w_samps,[0.025,0.975],axis=0)
         w_summary = pd.DataFrame({'Post Mean':mean,'Post Std':std,'P(w>0)':p,
