@@ -517,10 +517,12 @@ class Point_Process_Model:
         f_xy_post_mean=jnp.mean(f_xy_post, axis=0)
         self.comp_grid['post_mean'] = f_xy_post_mean
         intersect = gpd.overlay(self.comp_grid, self.A[['geometry']], how='intersection',keep_geom_type=True)
-        fig, ax = plt.subplots(1,2, figsize=(10, 5))
+        fig, ax = plt.subplots(1,3, figsize=(10, 5),gridspec_kw={'width_ratios': [10,10,1]})
         intersect.plot(column='post_mean',ax=ax[0])
         ax[0].set_title('Mean Posterior $f_s$')
-        intersect.plot(column='post_mean',ax=ax[1])
+        ax[2].set_axis_off()
+        cbar_ax = fig.add_axes([0.9, 0.1, 0.025, 0.8])
+        intersect.plot(column='post_mean',ax=ax[1],legend=True,cax=cbar_ax)
         self.points.plot(ax=ax[1],color='red',marker='x',**kwargs)
         ax[1].set_title('Mean Posterior $f_s$ With Events')
         return fig
@@ -532,10 +534,12 @@ class Point_Process_Model:
         post_samples = (self.samples['b_0'][:,self.args['int_df']['cov_ind'].values] + 
                         self.samples["f_xy"][:,self.args['int_df']['comp_grid_id'].values])
         self.args['int_df']['post_mean'] = post_samples.mean(axis=0)
-        fig, ax = plt.subplots(1,2, figsize=(10, 5))
+        fig, ax = plt.subplots(1,3, figsize=(10, 5),gridspec_kw={'width_ratios': [10,10,1]})
         self.args['int_df'].plot(column='post_mean',ax=ax[0])
         ax[0].set_title('Mean Posterior $f_s + X(s)w$')
-        self.args['int_df'].plot(column='post_mean',ax=ax[1])
+        ax[2].set_axis_off()
+        cbar_ax = fig.add_axes([0.9, 0.1, 0.025, 0.8])
+        self.args['int_df'].plot(column='post_mean',ax=ax[1],legend=True,cax=cbar_ax)
         self.points.plot(ax=ax[1],color='red',marker='x',**kwargs)
         ax[1].set_title('Mean Posterior $f_s + X(s)w$ With Events')
         
@@ -544,10 +548,12 @@ class Point_Process_Model:
         Plot spatial for covariates only.
         """
         self.spatial_cov['post_mean'] = self.samples['b_0'].mean(axis=0)
-        fig, ax = plt.subplots(1,2, figsize=(10, 5))
+        fig, ax = plt.subplots(1,3, figsize=(10, 5),gridspec_kw={'width_ratios': [10,10,1]})
         self.spatial_cov.plot(column='post_mean',ax=ax[0])
         ax[0].set_title('Mean Posterior $X(s)w$')
-        self.spatial_cov.plot(column='post_mean',ax=ax[1])
+        ax[2].set_axis_off()
+        cbar_ax = fig.add_axes([0.9, 0.1, 0.025, 0.8])
+        self.spatial_cov.plot(column='post_mean',ax=ax[1],legend=True,cax=cbar_ax)
         ax[1].set_title('Mean Posterior $X(s)w$ With Events')
         self.points.plot(ax=ax[1],color='red',marker='x',**kwargs)
         ax[1].set_title('Mean Posterior $f_s + X(s)w$ With Events')

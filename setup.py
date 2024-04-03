@@ -11,7 +11,7 @@ modules = ['dill>=0.3.5.1','geopandas>=0.14.0','importlib-resources','jax==0.4.2
 
 setup(
     name='BSTPP',
-    version=0.1,
+    version='0.1.1',
 
     url='https://github.com/imanring/BSTPP.git',
     author='Isaac Manring',
@@ -25,4 +25,5 @@ setup(
     py_modules=['bstpp'],
     description="Bayesian Spatiotemporal Point Process",
     long_description=desc,
+    long_description_content_type='text/markdown',
 )

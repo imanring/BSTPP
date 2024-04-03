@@ -9,7 +9,7 @@ This package provides bayesian inference for three spatiotemporal point process 
 ### Usage
 
 Install with
-```pip install git+https://github.com/imanring/BSTPP.git```
+```pip install BSTPP```
 
 API documentation is in ```bstpp_API_doc.pdf```.
 
