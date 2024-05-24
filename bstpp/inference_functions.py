@@ -16,6 +16,8 @@ from .vae_functions import *
 
 
 def spatiotemporal_hawkes_model(args):
+    # Model for Hawkes and Cox Hawkes
+    
     t_events=args["t_events"]
     xy_events=args["xy_events"]
     N=t_events.shape[0]
@@ -177,7 +179,6 @@ def run_mcmc(rng_key, model_mcmc, args):
 
     init_strategy = init_to_median(num_samples=10)
     kernel = NUTS(model_mcmc, init_strategy=init_strategy)#, max_tree_depth=(7,9))
-    #kernel = SVI(model_mcmc, )
     mcmc = MCMC(
         kernel,
         num_warmup=args["num_warmup"],
@@ -194,7 +195,10 @@ def run_mcmc(rng_key, model_mcmc, args):
 def get_samples(rng_key,model,guide,svi_result,args,sites):
     predictive = Predictive(model, guide=guide, params=svi_result.params, 
                             return_sites = sites,
-                            num_samples=args["num_samples"])
+                            num_samples=args["num_samples"], 
+                            parallel = True
+                           )
+    print("Sampling Posterior...")
     posterior_samples = predictive(rng_key, args=args)
     return posterior_samples
 
