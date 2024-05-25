@@ -11,7 +11,7 @@ modules = ['dill>=0.3.5.1','geopandas>=0.14.0','importlib-resources','jax==0.4.2
 
 setup(
     name='BSTPP',
-    version='0.1.1',
+    version='0.1.3',
 
     url='https://github.com/imanring/BSTPP.git',
     author='Isaac Manring',
