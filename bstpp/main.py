@@ -230,7 +230,10 @@ class Point_Process_Model:
                 raise Exception(f"Unknown argument {par}. Prior distributions must be instances of numpyro Distribution.")
         args['priors'] = default_priors
         self.args = args
-
+    
+    def __str__(self):
+        return "Point Process Model"
+    
     def load_rslts(self,file_name):
         """
         Load previously computed results
@@ -636,6 +639,10 @@ class Hawkes_Model(Point_Process_Model):
         self.args['t_trig'] = temporal_trig(self.args['priors'])
         self.args['sp_trig'] = spatial_trig(self.args['priors'])
     
+    def __str__(self):
+        model = "Hawkes" if self.args['model'] == "hawkes" else "Cox Hawkes"
+        return f"{model} Model with Covariates" if 'num_cov' in self.args else f"{model} Model without Covariates"
+        
     def get_params(self):
         """
         Returns
@@ -835,6 +842,9 @@ class LGCP_Model(Point_Process_Model):
         self.model = spatiotemporal_LGCP_model
         super().__init__(name,*args,**kwargs)
         
+    def __str__(self):
+        return "Log Gaussian Cox Model with Covariates" if 'num_cov' in self.args else "Log Gaussian Cox Model without Covariates"
+    
     def get_params(self):
         """
         Returns
